@@ -135,10 +135,11 @@ def scrape_site(
             # Extract same-domain links
             soup = BeautifulSoup(page.raw_html, "lxml")
             for link in soup.find_all("a", href=True):
-                href = urljoin(url, link["href"])
-                parsed = urlparse(href)
-                if parsed.netloc == domain and _normalize_url(href) not in visited:
-                    to_visit.append(href)
+                href_val = str(link["href"])
+                full_url = urljoin(url, href_val)
+                parsed = urlparse(full_url)
+                if parsed.netloc == domain and _normalize_url(full_url) not in visited:
+                    to_visit.append(full_url)
 
         except Exception as exc:
             logger.warning("Failed to scrape %s: %s", url, exc)

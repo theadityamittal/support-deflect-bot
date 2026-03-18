@@ -40,11 +40,10 @@ class BedrockProvider(LLMProvider):
         if system_prompts:
             kwargs["system"] = system_prompts
 
-        response: dict[str, Any] = self._client.converse(**kwargs)
+        raw: Any = self._client.converse(**kwargs)
 
-        output_message = response["output"]["message"]
-        text = output_message["content"][0]["text"]
-        usage = response["usage"]
+        text: str = raw["output"]["message"]["content"][0]["text"]
+        usage: dict[str, int] = raw["usage"]
 
         return LLMResponse(
             text=text,
