@@ -3,6 +3,9 @@ name: 'Integration Tests'
 on:
   push:
     branches: ['*']
+  pull_request:
+    branches: ['*']
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -26,7 +29,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install Dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -e ".[dev]"
+          python -c "import pathlib, slack_sdk; p = pathlib.Path(slack_sdk.__file__).parent.parent / 'slack'; p.exists() and __import__('shutil').rmtree(p)"
 
       - name: Run Integration Tests
         run: |

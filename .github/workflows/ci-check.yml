@@ -31,7 +31,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install Dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -e ".[dev]"
+          python -c "import pathlib, slack_sdk; p = pathlib.Path(slack_sdk.__file__).parent.parent / 'slack'; p.exists() and __import__('shutil').rmtree(p)"
 
       - name: Lint with Ruff
         run: ruff check src/ tests/
