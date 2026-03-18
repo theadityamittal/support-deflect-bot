@@ -124,7 +124,6 @@ Resources:
       CodeUri: ../src
       Timeout: 900
       MemorySize: 512
-      ReservedConcurrentExecutions: 5
       Events:
         SQSTrigger:
           Type: SQS
