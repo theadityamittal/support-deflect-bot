@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import UTC, date, datetime
 from typing import Any
 
 from botocore.exceptions import ClientError
-from state.models import CompletionRecord, OnboardingPlan
-from state.ttl import ttl_for_lock, ttl_for_plan
+from state.models import CompletionRecord, OnboardingPlan, WorkspaceConfig
+from state.ttl import ttl_for_injection_log, ttl_for_lock, ttl_for_plan
 
 logger = logging.getLogger(__name__)
 
@@ -90,5 +91,94 @@ class DynamoStateStore:
                 "sk": "KILL_SWITCH",
                 "active": active,
                 "updated_at": int(time.time()),
+            }
+        )
+
+    def save_workspace_config(
+        self,
+        *,
+        workspace_id: str,
+        team_name: str,
+        bot_token: str,
+        bot_user_id: str,
+    ) -> None:
+        """Save workspace configuration (upsert)."""
+        self._table.put_item(
+            Item={
+                "pk": f"WORKSPACE#{workspace_id}",
+                "sk": "CONFIG",
+                "workspace_id": workspace_id,
+                "team_name": team_name,
+                "bot_token": bot_token,
+                "bot_user_id": bot_user_id,
+                "active": True,
+                "updated_at": int(time.time()),
+            }
+        )
+
+    def get_workspace_config(self, *, workspace_id: str) -> WorkspaceConfig | None:
+        """Retrieve workspace configuration."""
+        response = self._table.get_item(
+            Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "CONFIG"}
+        )
+        item = response.get("Item")
+        if not item:
+            return None
+        return WorkspaceConfig(
+            workspace_id=item["workspace_id"],
+            team_name=item.get("team_name", ""),
+            bot_token=item.get("bot_token", ""),
+            bot_user_id=item.get("bot_user_id", ""),
+            active=item.get("active", True),
+        )
+
+    def get_daily_usage_turns(self, *, workspace_id: str, user_id: str) -> int:
+        """Get turn count for today's usage record."""
+        today = date.today().isoformat()
+        response = self._table.get_item(
+            Key={
+                "pk": f"WORKSPACE#{workspace_id}",
+                "sk": f"USAGE#{user_id}#{today}",
+            }
+        )
+        item = response.get("Item")
+        if not item:
+            return 0
+        result: int = int(item.get("turns", 0))
+        return result
+
+    def get_monthly_usage_cost(self, *, workspace_id: str) -> float:
+        """Get estimated cost for this month's workspace usage."""
+        month = date.today().strftime("%Y-%m")
+        response = self._table.get_item(
+            Key={
+                "pk": f"WORKSPACE#{workspace_id}",
+                "sk": f"USAGE#{month}",
+            }
+        )
+        item = response.get("Item")
+        if not item:
+            return 0.0
+        result: float = float(item.get("estimated_cost", 0.0))
+        return result
+
+    def log_injection_attempt(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        text: str,
+    ) -> None:
+        """Log an injection attempt to DynamoDB."""
+        now = datetime.now(UTC)
+        self._table.put_item(
+            Item={
+                "pk": "SECURITY",
+                "sk": f"INJECTION#{now.isoformat()}#{user_id}",
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "text": text[:200],
+                "timestamp": now.isoformat(),
+                "ttl": ttl_for_injection_log(),
             }
         )

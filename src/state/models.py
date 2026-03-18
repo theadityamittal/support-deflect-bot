@@ -185,3 +185,14 @@ class UsageRecord:
     output_tokens: int
     tool_calls: int
     estimated_cost: float
+
+
+@dataclass(frozen=True)
+class WorkspaceConfig:
+    """Workspace configuration stored in DynamoDB."""
+
+    workspace_id: str
+    team_name: str
+    bot_token: str
+    bot_user_id: str
+    active: bool = True
