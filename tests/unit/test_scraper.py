@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from rag.scraper import ScrapedPage, scrape_page
+from rag.scraper import ScrapedPage, scrape_page, scrape_site
 
 SAMPLE_HTML = """
 <html>
@@ -110,3 +110,95 @@ class TestScrapePage:
         )
         with pytest.raises(AttributeError):
             page.text = "modified"
+
+
+class TestScrapeSite:
+    """Tests for multi-page site crawling."""
+
+    @patch("rag.scraper.httpx")
+    def test_crawls_same_domain_links(self, mock_httpx):
+        main_html = """
+        <html><body>
+            <p>Main page</p>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+        </body></html>
+        """
+        about_html = "<html><body><p>About us</p></body></html>"
+        contact_html = "<html><body><p>Contact info</p></body></html>"
+
+        responses = {
+            "https://example.com": MagicMock(
+                status_code=200, text=main_html, url="https://example.com"
+            ),
+            "https://example.com/about": MagicMock(
+                status_code=200, text=about_html, url="https://example.com/about"
+            ),
+            "https://example.com/contact": MagicMock(
+                status_code=200, text=contact_html, url="https://example.com/contact"
+            ),
+        }
+        for r in responses.values():
+            r.raise_for_status = MagicMock()
+
+        mock_httpx.get.side_effect = lambda url, **kw: responses[url]
+
+        pages = scrape_site("https://example.com", max_pages=10)
+        assert len(pages) == 3
+
+    @patch("rag.scraper.httpx")
+    def test_respects_max_pages(self, mock_httpx):
+        html = '<html><body><p>Page</p><a href="/next">Next</a></body></html>'
+        mock_response = MagicMock(status_code=200, text=html, url="https://example.com")
+        mock_response.raise_for_status = MagicMock()
+        mock_httpx.get.return_value = mock_response
+
+        pages = scrape_site("https://example.com", max_pages=1)
+        assert len(pages) == 1
+
+    @patch("rag.scraper.httpx")
+    def test_skips_cross_domain_links(self, mock_httpx):
+        html = """
+        <html><body>
+            <p>Page</p>
+            <a href="https://other.com/page">External</a>
+        </body></html>
+        """
+        mock_response = MagicMock(status_code=200, text=html, url="https://example.com")
+        mock_response.raise_for_status = MagicMock()
+        mock_httpx.get.return_value = mock_response
+
+        pages = scrape_site("https://example.com", max_pages=10)
+        assert len(pages) == 1  # Only the start page
+
+    @patch("rag.scraper.httpx")
+    def test_handles_page_failure_gracefully(self, mock_httpx):
+        main_html = '<html><body><p>Main</p><a href="/broken">Broken</a></body></html>'
+        mock_httpx.get.side_effect = [
+            MagicMock(
+                status_code=200,
+                text=main_html,
+                url="https://example.com",
+                raise_for_status=MagicMock(),
+            ),
+            Exception("Connection refused"),
+        ]
+
+        pages = scrape_site("https://example.com", max_pages=10)
+        assert len(pages) == 1  # Only main page, broken one skipped
+
+    @patch("rag.scraper.httpx")
+    def test_deduplicates_urls(self, mock_httpx):
+        html = """
+        <html><body>
+            <p>Page</p>
+            <a href="/">Home</a>
+            <a href="/">Home again</a>
+        </body></html>
+        """
+        mock_response = MagicMock(status_code=200, text=html, url="https://example.com")
+        mock_response.raise_for_status = MagicMock()
+        mock_httpx.get.return_value = mock_response
+
+        pages = scrape_site("https://example.com", max_pages=10)
+        assert len(pages) == 1  # Same URL not visited twice

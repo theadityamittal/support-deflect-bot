@@ -112,3 +112,36 @@ class TestRAGPipeline:
 
         with pytest.raises(AttributeError):
             result.query = "modified"
+
+
+class TestExtractKeywords:
+    """Tests for keyword extraction from queries."""
+
+    def test_removes_stop_words(self):
+        from rag.pipeline import _extract_keywords
+
+        keywords = _extract_keywords("What is the refund policy?")
+        assert "what" not in keywords
+        assert "the" not in keywords
+        assert "refund" in keywords
+        assert "policy" in keywords
+
+    def test_filters_short_words(self):
+        from rag.pipeline import _extract_keywords
+
+        keywords = _extract_keywords("I am a new volunteer")
+        assert "am" not in keywords
+        assert "volunteer" in keywords
+
+    def test_empty_query_returns_empty(self):
+        from rag.pipeline import _extract_keywords
+
+        keywords = _extract_keywords("")
+        assert keywords == set()
+
+    def test_lowercases_keywords(self):
+        from rag.pipeline import _extract_keywords
+
+        keywords = _extract_keywords("Refund POLICY")
+        assert "refund" in keywords
+        assert "policy" in keywords
