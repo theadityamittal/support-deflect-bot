@@ -1,0 +1,413 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Onboard Assist - Adaptive AI onboarding Slack bot for nonprofits.
+  7 Lambda functions, API Gateway, SQS FIFO, DynamoDB, S3.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        DYNAMODB_TABLE_NAME: !Ref StateTable
+        S3_BUCKET_NAME: !Ref DocumentBucket
+        PINECONE_INDEX_NAME: !Ref PineconeIndexName
+        POWERTOOLS_SERVICE_NAME: onboard-assist
+        POWERTOOLS_LOG_LEVEL: INFO
+        LOG_LEVEL: INFO
+
+Parameters:
+  PineconeIndexName:
+    Type: String
+    Default: onboard-assist
+  KillSwitchBudgetAmount:
+    Type: Number
+    Default: 10
+  WarningBudgetAmount:
+    Type: Number
+    Default: 7
+
+Resources:
+  # ============================================================
+  # API Gateway
+  # ============================================================
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Description: Onboard Assist API - 5 routes
+
+  # ============================================================
+  # Lambda Functions (7)
+  # ============================================================
+  SlackHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: onboard-assist-slack-handler
+      Handler: slack.handler.lambda_handler
+      CodeUri: ../src
+      Timeout: 10
+      Events:
+        SlackEvents:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /slack/events
+            Method: post
+        SlackCommands:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /slack/commands
+            Method: post
+        SlackInteractions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /slack/interactions
+            Method: post
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StateTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt MessageQueue.QueueName
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref SlackSigningSecret
+
+  SlackOAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: onboard-assist-slack-oauth
+      Handler: slack.oauth.lambda_handler
+      CodeUri: ../src
+      Events:
+        OAuthCallback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /slack/oauth/callback
+            Method: get
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StateTable
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref SlackSigningSecret
+
+  GoogleOAuthCallbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: onboard-assist-google-oauth
+      Handler: gcal.callback.lambda_handler
+      CodeUri: ../src
+      Events:
+        GoogleCallback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /google/oauth/callback
+            Method: get
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StateTable
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref GoogleOAuthSecret
+
+  AgentWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: onboard-assist-agent-worker
+      Handler: agent.worker.lambda_handler
+      CodeUri: ../src
+      Timeout: 900
+      MemorySize: 512
+      ReservedConcurrentExecutions: 5
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MessageQueue.Arn
+            BatchSize: 1
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StateTable
+        - S3CrudPolicy:
+            BucketName: !Ref DocumentBucket
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref PineconeApiKeySecret
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref GoogleOAuthSecret
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: "*"
+
+  KillSwitchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: onboard-assist-kill-switch
+      Handler: admin.kill_switch.lambda_handler
+      CodeUri: ../src
+      Events:
+        BudgetAlarm:
+          Type: SNS
+          Properties:
+            Topic: !Ref BudgetAlarmTopic
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StateTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - apigateway:PATCH
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${ApiGateway}/stages/prod"
+
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: onboard-assist-health-check
+      Handler: admin.health_check.lambda_handler
+      CodeUri: ../src
+      Events:
+        DailyCheck:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 8 * * ? *)
+            Description: Daily Pinecone health check at 8 AM UTC
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref PineconeApiKeySecret
+
+  NudgeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: onboard-assist-nudge
+      Handler: admin.nudge.lambda_handler
+      CodeUri: ../src
+      Events:
+        DailyNudge:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 14 * * ? *)
+            Description: Daily inactivity nudge at 2 PM UTC
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref StateTable
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref SlackSigningSecret
+
+  # ============================================================
+  # SQS
+  # ============================================================
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: onboard-assist-queue.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: onboard-assist-dlq.fifo
+      FifoQueue: true
+
+  # ============================================================
+  # DynamoDB
+  # ============================================================
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: onboard-assist
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ============================================================
+  # S3
+  # ============================================================
+  DocumentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "onboard-assist-docs-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+
+  # ============================================================
+  # Secrets Manager
+  # ============================================================
+  PineconeApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: onboard-assist/pinecone-api-key
+      Description: Pinecone API key
+
+  GoogleOAuthSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: onboard-assist/google-oauth
+      Description: Google OAuth client ID and secret
+
+  SlackSigningSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: onboard-assist/slack-signing-secret
+      Description: Slack signing secret and bot token
+
+  # ============================================================
+  # SNS + Budget Alarm
+  # ============================================================
+  BudgetAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: onboard-assist-budget-alarm
+
+  # ============================================================
+  # AWS Budget
+  # ============================================================
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: onboard-assist-monthly
+        BudgetLimit:
+          Amount: !Ref KillSwitchBudgetAmount
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 70
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref BudgetAlarmTopic
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref BudgetAlarmTopic
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 150
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref BudgetAlarmTopic
+
+  # ============================================================
+  # CloudWatch Alarms (3)
+  # ============================================================
+  DLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: onboard-assist-dlq-messages
+      AlarmDescription: Messages in DLQ (processing failures)
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+
+  LambdaErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: onboard-assist-lambda-error-rate
+      AlarmDescription: Agent Worker Lambda error rate > 5% over 5 minutes
+      Metrics:
+        - Id: errors
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref AgentWorkerFunction
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+        - Id: invocations
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Invocations
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref AgentWorkerFunction
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+        - Id: error_rate
+          Expression: "(errors / invocations) * 100"
+          Label: Error Rate Percentage
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  BudgetWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: onboard-assist-budget-warning
+      AlarmDescription: AWS spend approaching budget limit
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      Threshold: !Ref WarningBudgetAmount
+      ComparisonOperator: GreaterThanThreshold
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  SlackEventsUrl:
+    Description: URL for Slack Events subscription
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/slack/events"
+  QueueUrl:
+    Description: SQS FIFO Queue URL
+    Value: !Ref MessageQueue
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref StateTable
