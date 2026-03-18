@@ -1,0 +1,35 @@
+name: 'Integration Tests'
+
+on:
+  push:
+    branches: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  integration-tests:
+    name: 'Integration Tests'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run Integration Tests
+        run: |
+          pytest tests/integration/ \
+            -v \
+            -m integration
