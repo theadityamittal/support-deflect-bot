@@ -1,5 +1,0 @@
-question,type,answer,confidence,citations,status
-How do I enable debug mode?,answer,"To enable debug mode, set TOOL_DEBUG=1 in your environment or pass --debug to commands. You can do this by running `export TOOL_DEBUG=1` in your terminal before using the tool, or by adding the flag directly to a command with `tool --debug <command>`.",0.402,2,OK
-Where are logs stored?,answer,Logs are stored under ~/.tool/logs by default or in a directory specified by the TOOL_LOG_DIR environment variable. You can also change this location using the flag `--log-dir` when running commands. For example: `tool run --log-dir /path/to/log/dir`.,0.402,2,OK
-How do I reset my configuration?,answer,"To reset your configuration, delete the file `~/.tool/config.yml` and then run `tool init`. This will recreate a default configuration for you.   Note: Make sure to replace `~/.tool/config.yml` with the actual path where your config file is located on your system.",0.402,2,OK
-How do I reset my database password?,refusal,I don’t have enough information in the docs to answer that.,0.135,2,OK
