@@ -63,5 +63,5 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
-      - run: sam build
-      - run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
+      - run: sam build --template infra/template.yaml
+      - run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --resolve-s3 --stack-name onboard-assist --capabilities CAPABILITY_IAM
