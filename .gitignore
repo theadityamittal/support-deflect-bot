@@ -97,3 +97,13 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# SAM build artifacts
+.aws-sam/
+samconfig.toml.bak
+
+# Pinecone
+pinecone_data/
+
+# Lambda layers
+layers/
