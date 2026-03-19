@@ -1,0 +1,49 @@
+name: 'E2E Tests'
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  e2e-tests:
+    name: 'E2E Tests'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Install Dependencies
+        run: |
+          pip install -e ".[dev]"
+          python -c "import pathlib, slack_sdk; p = pathlib.Path(slack_sdk.__file__).parent.parent / 'slack'; p.exists() and __import__('shutil').rmtree(p)"
+
+      - name: Run E2E Tests
+        env:
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+        run: |
+          pytest tests/e2e/ \
+            -v \
+            -m e2e \
+            --no-cov \
+            -s

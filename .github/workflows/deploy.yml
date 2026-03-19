@@ -1,13 +1,14 @@
 name: 'Deploy'
 
 on:
-  pull_request:
+  workflow_run:
+    workflows: ['E2E Tests']
+    types: [completed]
     branches: [main]
-    types: [closed]
 
 jobs:
   deploy:
-    if: github.event.pull_request.merged == true && vars.DEPLOY_ENABLED == 'true'
+    if: github.event.workflow_run.conclusion == 'success' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
 
     permissions:

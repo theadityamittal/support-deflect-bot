@@ -11,6 +11,8 @@ Globals:
     MemorySize: 256
     Architectures:
       - arm64
+    Layers:
+      - !Ref DepsLayer
     Environment:
       Variables:
         DYNAMODB_TABLE_NAME: !Ref StateTable
@@ -42,6 +44,23 @@ Resources:
       Description: Onboard Assist API - 5 routes
 
   # ============================================================
+  # Lambda Layer (shared dependencies)
+  # ============================================================
+  DepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: onboard-assist-deps
+      ContentUri: layers/deps
+      Description: Python dependencies for all Lambda functions
+      CompatibleRuntimes:
+        - python3.12
+      CompatibleArchitectures:
+        - arm64
+    Metadata:
+      BuildMethod: makefile
+      BuildArchitecture: arm64
+
+  # ============================================================
   # Lambda Functions (7)
   # ============================================================
   SlackHandlerFunction:
@@ -51,6 +70,10 @@ Resources:
       Handler: slack.handler.lambda_handler
       CodeUri: ../src
       Timeout: 10
+      Environment:
+        Variables:
+          SQS_QUEUE_URL: !Ref MessageQueue
+          SLACK_SIGNING_SECRET_ARN: !Ref SlackSigningSecret
       Events:
         SlackEvents:
           Type: Api
