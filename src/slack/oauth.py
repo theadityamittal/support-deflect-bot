@@ -52,7 +52,7 @@ def _exchange_code_for_token(code: str) -> dict[str, Any]:
     from slack_sdk import WebClient
 
     # Get client credentials from Secrets Manager
-    secret_arn = os.environ.get("SLACK_SIGNING_SECRET_ARN", "")
+    secret_arn = os.environ.get("APP_SECRETS_ARN", "")
     secrets = _get_secret(secret_arn) if secret_arn else {}
 
     client = WebClient()

@@ -5,8 +5,17 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import agent.worker as _worker_module
 import pytest
 from agent.worker import _get_bot_token, _send_slack_message, lambda_handler
+
+
+@pytest.fixture(autouse=True)
+def _reset_secret_cache():
+    """Clear the module-level secret cache between tests."""
+    _worker_module._cached_secrets = None
+    yield
+    _worker_module._cached_secrets = None
 
 
 def _sqs_event(body: dict) -> dict:
@@ -83,7 +92,7 @@ class TestGetBotToken:
             "SecretString": json.dumps({"bot_token": "xoxb-real-token"})
         }
 
-        with patch.dict("os.environ", {"SLACK_SIGNING_SECRET_ARN": "arn:aws:sm:test"}):
+        with patch.dict("os.environ", {"APP_SECRETS_ARN": "arn:aws:sm:test"}):
             token = _get_bot_token("W1")
 
         assert token == "xoxb-real-token"
@@ -102,7 +111,7 @@ class TestGetBotToken:
         mock_config.bot_token = "xoxb-dynamo-token"
 
         with (
-            patch.dict("os.environ", {"SLACK_SIGNING_SECRET_ARN": "arn:aws:sm:test"}),
+            patch.dict("os.environ", {"APP_SECRETS_ARN": "arn:aws:sm:test"}),
             patch("state.dynamo.DynamoStateStore") as mock_store_cls,
         ):
             mock_store_cls.return_value.get_workspace_config.return_value = mock_config

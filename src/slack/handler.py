@@ -184,9 +184,8 @@ def _get_state_store() -> Any:
 
 def _get_signing_secret() -> str:
     """Retrieve Slack signing secret from Secrets Manager."""
-    secret_arn = os.environ.get("SLACK_SIGNING_SECRET_ARN", "")
+    secret_arn = os.environ.get("APP_SECRETS_ARN", "")
     if not secret_arn:
-        # Fallback for local dev
         return os.environ.get("SLACK_SIGNING_SECRET", "")
 
     client = boto3.client("secretsmanager")

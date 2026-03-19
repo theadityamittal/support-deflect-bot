@@ -12,6 +12,30 @@ import boto3
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+_cached_secrets: dict[str, str] | None = None
+
+
+def _get_app_secrets() -> dict[str, str]:
+    """Read consolidated secrets from Secrets Manager. Cached per cold start."""
+    global _cached_secrets  # noqa: PLW0603
+    if _cached_secrets is not None:
+        return _cached_secrets
+
+    secret_arn = os.environ.get("APP_SECRETS_ARN", "")
+    logger.debug(
+        "_get_app_secrets: APP_SECRETS_ARN=%s",
+        secret_arn[:20] if secret_arn else "(empty)",
+    )
+    if not secret_arn:
+        msg = "APP_SECRETS_ARN not set"
+        raise ValueError(msg)
+
+    client = boto3.client("secretsmanager")
+    response = client.get_secret_value(SecretId=secret_arn)
+    _cached_secrets = json.loads(response["SecretString"])
+    logger.debug("_get_app_secrets: loaded %d keys", len(_cached_secrets))
+    return _cached_secrets
+
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Process an SQS message: parse → orchestrate → respond via Slack."""
@@ -74,25 +98,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 def _get_bot_token(workspace_id: str) -> str:
-    """Get bot token from Secrets Manager or DynamoDB workspace config."""
-    secret_arn = os.environ.get("SLACK_SIGNING_SECRET_ARN", "")
-    logger.debug(
-        "_get_bot_token: SLACK_SIGNING_SECRET_ARN=%s",
-        secret_arn[:20] if secret_arn else "(empty)",
-    )
-    if secret_arn:
-        client = boto3.client("secretsmanager")
-        response = client.get_secret_value(SecretId=secret_arn)
-        secret = json.loads(response["SecretString"])
-        token = secret.get("bot_token", "")
-        logger.debug(
-            "_get_bot_token: secrets manager returned token=%s",
-            bool(token and token != "placeholder"),
-        )
+    """Get bot token from consolidated secret or DynamoDB workspace config."""
+    try:
+        secrets = _get_app_secrets()
+        token = secrets.get("bot_token", "")
         if token and token != "placeholder":
+            logger.debug("_get_bot_token: found in consolidated secret")
             return str(token)
+    except ValueError:
+        logger.debug("_get_bot_token: APP_SECRETS_ARN not set, trying DynamoDB")
 
-    logger.debug("_get_bot_token: falling back to DynamoDB workspace config")
     from state.dynamo import DynamoStateStore
 
     table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
@@ -100,34 +115,11 @@ def _get_bot_token(workspace_id: str) -> str:
     store = DynamoStateStore(table=table)
     config = store.get_workspace_config(workspace_id=workspace_id)
     if config:
-        logger.debug(
-            "_get_bot_token: found workspace config, token present=%s",
-            bool(config.bot_token),
-        )
+        logger.debug("_get_bot_token: found workspace config")
         return str(config.bot_token)
 
     msg = f"No bot token found for workspace {workspace_id}"
     raise ValueError(msg)
-
-
-def _get_pinecone_api_key() -> str:
-    """Get Pinecone API key from Secrets Manager."""
-    secret_arn = os.environ.get("PINECONE_API_KEY_SECRET_ARN", "")
-    logger.debug(
-        "_get_pinecone_api_key: SECRET_ARN=%s",
-        secret_arn[:20] if secret_arn else "(empty)",
-    )
-    if not secret_arn:
-        key = os.environ.get("PINECONE_API_KEY", "")
-        if key:
-            logger.debug("_get_pinecone_api_key: using PINECONE_API_KEY env var")
-            return key
-        msg = "No Pinecone API key configured"
-        raise ValueError(msg)
-    client = boto3.client("secretsmanager")
-    response = client.get_secret_value(SecretId=secret_arn)
-    logger.debug("_get_pinecone_api_key: retrieved from Secrets Manager")
-    return str(response["SecretString"])
 
 
 def _create_orchestrator(
@@ -142,7 +134,7 @@ def _create_orchestrator(
     from agent.tools.search_kb import SearchKBTool
     from agent.tools.send_message import SendMessageTool
     from config.settings import get_settings
-    from llm.bedrock import BedrockProvider
+    from llm.gemini import GeminiProvider
     from llm.router import LLMRouter
     from middleware.agent.turn_budget import TurnBudgetEnforcer
     from rag.vectorstore import PineconeVectorStore
@@ -163,7 +155,8 @@ def _create_orchestrator(
     state_store = DynamoStateStore(table=table)
     logger.debug("_create_orchestrator: DynamoDB state store ready")
 
-    provider = BedrockProvider(region=settings.aws_region)
+    secrets = _get_app_secrets()
+    provider = GeminiProvider(api_key=secrets["gemini_api_key"])
     router = LLMRouter(
         provider=provider,
         reasoning_model_id=settings.reasoning_model_id,
@@ -179,8 +172,7 @@ def _create_orchestrator(
     slack_client = SlackClient(web_client=web_client)
     logger.debug("_create_orchestrator: Slack client ready")
 
-    logger.debug("_create_orchestrator: fetching Pinecone API key")
-    pinecone_key = _get_pinecone_api_key()
+    pinecone_key = secrets["pinecone_api_key"]
     logger.debug(
         "_create_orchestrator: initializing PineconeVectorStore index=%s",
         settings.pinecone_index_name,
