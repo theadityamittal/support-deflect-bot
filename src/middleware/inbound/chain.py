@@ -71,15 +71,17 @@ class InboundMiddlewareChain:
             if not result.allowed:
                 return result
 
-            # 4. InputSanitizer (CPU + conditional DynamoDB write)
-            result = self._sanitizer.check(event)
-            if not result.allowed:
-                return result
-
-        # 5. ConcurrencyGuard (1 DynamoDB conditional write)
+        # 4. ConcurrencyGuard (1 DynamoDB conditional write)
         result = self._concurrency_guard.check(event)
         if not result.allowed:
             return result
+
+        # Text-content sanitization (skip for TEAM_JOIN)
+        if event.event_type != EventType.TEAM_JOIN:
+            # 5. InputSanitizer (CPU + conditional DynamoDB write)
+            result = self._sanitizer.check(event)
+            if not result.allowed:
+                return result
 
         # 6. TokenBudgetGuard (2 DynamoDB reads)
         result = self._budget_guard.check(event)

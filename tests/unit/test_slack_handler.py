@@ -206,8 +206,9 @@ class TestSendEphemeralRejection:
             channel="C1", user="U1", text="Rate limited"
         )
 
+    @patch("slack_sdk.WebClient")
     @patch("slack.handler._get_state_store")
-    def test_skips_when_no_config(self, mock_get_store):
+    def test_skips_when_no_config(self, mock_get_store, mock_wc_cls):
         mock_store = MagicMock()
         mock_store.get_workspace_config.return_value = None
         mock_get_store.return_value = mock_store
@@ -218,6 +219,7 @@ class TestSendEphemeralRejection:
             user_id="U1",
             text="Rate limited",
         )
+        mock_wc_cls.assert_not_called()
 
     @patch("slack_sdk.WebClient")
     @patch("slack.handler._get_state_store")

@@ -34,7 +34,7 @@ class BotFilter:
         self._bot_user_id = bot_user_id
 
     def check(self, event: SlackEvent) -> MiddlewareResult:
-        if event.is_bot or event.user_id == self._bot_user_id:
+        if event.is_bot or (self._bot_user_id and event.user_id == self._bot_user_id):
             return MiddlewareResult.drop()
         return MiddlewareResult.allow()
 
