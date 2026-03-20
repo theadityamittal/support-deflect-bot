@@ -103,10 +103,10 @@ def dynamodb_table():
 
 
 @pytest.fixture()
-def state_store():
+def state_store(dynamodb_table):
     from state.dynamo import DynamoStateStore
 
-    return DynamoStateStore(table_name=DYNAMODB_TABLE)
+    return DynamoStateStore(table=dynamodb_table)
 
 
 @pytest.fixture()
