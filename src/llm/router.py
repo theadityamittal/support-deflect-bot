@@ -1,7 +1,7 @@
 """LLM model router with two-model split and cost tracking.
 
-Routes reasoning calls to Nova Micro (cheap) and generation
-calls to Claude Haiku (capable). Tracks cumulative token
+Routes reasoning calls to Gemini 2.5 Flash Lite (cheap) and generation
+calls to Gemini 2.5 Flash (capable). Tracks cumulative token
 usage and estimated cost for budget enforcement.
 """
 
@@ -11,15 +11,15 @@ from typing import Any
 
 from llm.provider import LLMProvider, LLMResponse, ModelRole
 
-# Pricing per 1M tokens (USD) -- Bedrock on-demand, us-east-1
+# Pricing per 1M tokens (USD) -- Google Gemini API, paid tier
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "us.amazon.nova-micro-v1:0": {
-        "input_per_1m": 0.035,
-        "output_per_1m": 0.14,
+    "gemini-2.5-flash-lite": {
+        "input_per_1m": 0.10,
+        "output_per_1m": 0.40,
     },
-    "us.anthropic.claude-3-5-haiku-20241022-v1:0": {
-        "input_per_1m": 0.80,
-        "output_per_1m": 4.00,
+    "gemini-2.5-flash": {
+        "input_per_1m": 0.30,
+        "output_per_1m": 2.50,
     },
 }
 

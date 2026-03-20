@@ -6,6 +6,7 @@ Pinecone Starter tier pauses indexes after 3 weeks of inactivity.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -38,16 +39,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 def _get_pinecone_client() -> Any:
-    """Get Pinecone client using API key from Secrets Manager."""
+    """Get Pinecone client using API key from consolidated secret."""
     from pinecone import Pinecone
 
-    secret_arn = os.environ.get("PINECONE_API_KEY_SECRET_ARN", "")
+    secret_arn = os.environ.get("APP_SECRETS_ARN", "")
     api_key = ""
 
     if secret_arn:
         client = boto3.client("secretsmanager")
         response = client.get_secret_value(SecretId=secret_arn)
-        api_key = response["SecretString"]
+        secrets = json.loads(response["SecretString"])
+        api_key = secrets.get("pinecone_api_key", "")
     else:
         api_key = os.environ.get("PINECONE_API_KEY", "")
 

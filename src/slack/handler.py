@@ -26,6 +26,19 @@ from slack.models import SlackCommand, SlackEvent, SQSMessage
 from slack.signature import InvalidSignatureError, verify_slack_signature
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+
+def _get_header(headers: dict[str, str], name: str) -> str:
+    """Case-insensitive header lookup."""
+    value = headers.get(name, "")
+    if value:
+        return value
+    lower_name = name.lower()
+    for key, val in headers.items():
+        if key.lower() == lower_name:
+            return val
+    return ""
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -34,25 +47,45 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     headers = event.get("headers", {})
     path = event.get("path", "")
 
+    logger.debug(
+        "lambda_handler invoked: path=%s, body_length=%d, header_keys=%s",
+        path,
+        len(body_str),
+        list(headers.keys()),
+    )
+    logger.debug("body preview: %s", body_str[:500])
+
     # Verify Slack signature
     signing_secret = _get_signing_secret()
+    logger.debug("signing_secret retrieved (length=%d)", len(signing_secret))
+    timestamp = _get_header(headers, "X-Slack-Request-Timestamp")
+    signature = _get_header(headers, "X-Slack-Signature")
+    logger.debug(
+        "timestamp=%s, signature=%s",
+        timestamp,
+        signature[:20] if signature else "(empty)",
+    )
     try:
         verify_slack_signature(
             signing_secret=signing_secret,
             body=body_str,
-            timestamp=headers.get("X-Slack-Request-Timestamp", ""),
-            signature=headers.get("X-Slack-Signature", ""),
+            timestamp=timestamp,
+            signature=signature,
         )
-    except InvalidSignatureError:
-        logger.warning("Invalid Slack signature")
+        logger.debug("Signature verified OK")
+    except InvalidSignatureError as e:
+        logger.warning("Invalid Slack signature: %s", e)
         return _json_response(401, {"error": "Invalid signature"})
 
     # Route by path
     if path == "/slack/commands":
+        logger.debug("Routing to slash command handler")
         return _handle_slash_command(body_str)
     elif path == "/slack/interactions":
+        logger.debug("Routing to interaction handler")
         return _handle_interaction(body_str)
     else:
+        logger.debug("Routing to event handler")
         return _handle_event(body_str)
 
 
@@ -62,14 +95,25 @@ def _handle_event(body_str: str) -> dict[str, Any]:
 
     # URL verification challenge
     if body.get("type") == "url_verification":
+        logger.debug("URL verification challenge")
         return _json_response(200, {"challenge": body["challenge"]})
 
     # Parse event
     slack_event = SlackEvent.from_event_body(body)
+    logger.debug(
+        "Parsed event: type=%s, user=%s, channel=%s, text=%s",
+        slack_event.event_type,
+        slack_event.user_id,
+        slack_event.channel_id,
+        slack_event.text[:80] if slack_event.text else "(empty)",
+    )
 
     # Run middleware chain
-    chain = _build_middleware_chain()
+    chain = _build_middleware_chain(workspace_id=slack_event.workspace_id)
     result = chain.run(slack_event)
+    logger.debug(
+        "Middleware result: allowed=%s, reason=%s", result.allowed, result.reason
+    )
 
     if not result.allowed:
         logger.info(
@@ -77,6 +121,13 @@ def _handle_event(body_str: str) -> dict[str, Any]:
             slack_event.event_id,
             result.reason,
         )
+        if result.should_respond and result.reason and slack_event.channel_id:
+            _send_ephemeral_rejection(
+                workspace_id=slack_event.workspace_id,
+                channel_id=slack_event.channel_id,
+                user_id=slack_event.user_id,
+                text=result.reason,
+            )
         return _json_response(200, {"ok": True})
 
     # Enqueue to SQS
@@ -92,6 +143,7 @@ def _handle_event(body_str: str) -> dict[str, Any]:
         is_dm=slack_event.channel_id.startswith("D"),
         thread_ts=slack_event.thread_ts,
     )
+    logger.debug("SQS message prepared: %s", json.dumps(sqs_msg.to_dict())[:300])
     _enqueue_to_sqs(sqs_msg)
 
     return _json_response(200, {"ok": True})
@@ -120,12 +172,14 @@ def _handle_interaction(body_str: str) -> dict[str, Any]:
     return _json_response(200, {"ok": True})
 
 
-def _build_middleware_chain() -> Any:
+def _build_middleware_chain(*, workspace_id: str) -> Any:
     """Build the inbound middleware chain with real dependencies."""
     from middleware.inbound.chain import InboundMiddlewareChain
 
     state_store = _get_state_store()
-    return InboundMiddlewareChain(state_store=state_store)
+    config = state_store.get_workspace_config(workspace_id=workspace_id)
+    bot_user_id = config.bot_user_id if config else ""
+    return InboundMiddlewareChain(state_store=state_store, bot_user_id=bot_user_id)
 
 
 def _get_state_store() -> Any:
@@ -139,9 +193,8 @@ def _get_state_store() -> Any:
 
 def _get_signing_secret() -> str:
     """Retrieve Slack signing secret from Secrets Manager."""
-    secret_arn = os.environ.get("SLACK_SIGNING_SECRET_ARN", "")
+    secret_arn = os.environ.get("APP_SECRETS_ARN", "")
     if not secret_arn:
-        # Fallback for local dev
         return os.environ.get("SLACK_SIGNING_SECRET", "")
 
     client = boto3.client("secretsmanager")
@@ -152,6 +205,34 @@ def _get_signing_secret() -> str:
         return str(secret_data.get("signing_secret", secret_str))
     except json.JSONDecodeError:
         return secret_str
+
+
+def _send_ephemeral_rejection(
+    *,
+    workspace_id: str,
+    channel_id: str,
+    user_id: str,
+    text: str,
+) -> None:
+    """Send an ephemeral rejection message to the user."""
+    state_store = _get_state_store()
+    config = state_store.get_workspace_config(workspace_id=workspace_id)
+    if not config or not config.bot_token:
+        logger.warning(
+            "No bot_token for workspace %s, skipping ephemeral", workspace_id
+        )
+        return
+    try:
+        from slack_sdk import WebClient
+
+        client = WebClient(token=config.bot_token)
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=text,
+        )
+    except Exception:
+        logger.exception("Failed to send ephemeral rejection")
 
 
 def _enqueue_to_sqs(msg: SQSMessage) -> None:

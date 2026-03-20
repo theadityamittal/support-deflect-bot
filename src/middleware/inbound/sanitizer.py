@@ -10,7 +10,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from slack.models import EventType, MiddlewareResult, SlackEvent
+from slack.models import MiddlewareResult, SlackEvent
 
 if TYPE_CHECKING:
     from state.dynamo import DynamoStateStore
@@ -45,10 +45,6 @@ class InputSanitizer:
         self._max_length = max_length
 
     def check(self, event: SlackEvent) -> MiddlewareResult:
-        # team_join events have no user text to sanitize
-        if event.event_type == EventType.TEAM_JOIN:
-            return MiddlewareResult.allow()
-
         text = event.text
 
         # Check for injection patterns

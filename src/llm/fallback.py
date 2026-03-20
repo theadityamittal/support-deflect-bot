@@ -1,6 +1,6 @@
 """LLM fallback chain: try providers in order until one succeeds.
 
-Chain order from spec: Nova Micro -> Claude Haiku -> graceful error.
+Chain order from spec: Flash Lite -> Flash -> graceful error.
 """
 
 from __future__ import annotations

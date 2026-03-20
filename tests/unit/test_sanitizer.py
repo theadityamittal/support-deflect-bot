@@ -59,17 +59,9 @@ class TestInputSanitizer:
         result = sanitizer.check(_make_event(long_text))
         assert result.allowed is True
 
-    def test_allows_team_join_without_text_check(self):
-        event = SlackEvent(
-            event_id="Ev001",
-            workspace_id="W1",
-            user_id="U1",
-            channel_id="",
-            text="",
-            event_type=EventType.TEAM_JOIN,
-            timestamp="123",
-        )
+    def test_allows_empty_text_no_injection(self):
+        """Empty text matches no injection patterns — allowed naturally."""
         mock_store = MagicMock()
         sanitizer = InputSanitizer(state_store=mock_store, strike_limit=3)
-        result = sanitizer.check(event)
+        result = sanitizer.check(_make_event(""))
         assert result.allowed is True

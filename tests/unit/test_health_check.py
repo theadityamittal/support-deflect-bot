@@ -34,13 +34,13 @@ class TestHealthCheckLambda:
     @patch("admin.health_check.boto3")
     @patch(
         "admin.health_check.os.environ",
-        {
-            "PINECONE_API_KEY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123:secret:key"
-        },
+        {"APP_SECRETS_ARN": "arn:aws:secretsmanager:us-east-1:123:secret:key"},
     )
     def test_get_pinecone_client_uses_secrets_manager(self, mock_boto3):
         mock_sm = MagicMock()
-        mock_sm.get_secret_value.return_value = {"SecretString": "my-secret-key"}
+        mock_sm.get_secret_value.return_value = {
+            "SecretString": '{"pinecone_api_key": "my-secret-key"}'
+        }
         mock_boto3.client.return_value = mock_sm
 
         mock_pinecone_cls = MagicMock()

@@ -28,10 +28,10 @@ Parameters:
     Default: onboard-assist
   KillSwitchBudgetAmount:
     Type: Number
-    Default: 10
+    Default: 5
   WarningBudgetAmount:
     Type: Number
-    Default: 7
+    Default: 3.5
 
 Resources:
   # ============================================================
@@ -73,7 +73,7 @@ Resources:
       Environment:
         Variables:
           SQS_QUEUE_URL: !Ref MessageQueue
-          SLACK_SIGNING_SECRET_ARN: !Ref SlackSigningSecret
+          APP_SECRETS_ARN: !Ref AppSecrets
       Events:
         SlackEvents:
           Type: Api
@@ -99,7 +99,7 @@ Resources:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt MessageQueue.QueueName
         - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref SlackSigningSecret
+            SecretArn: !Ref AppSecrets
 
   SlackOAuthFunction:
     Type: AWS::Serverless::Function
@@ -118,7 +118,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref StateTable
         - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref SlackSigningSecret
+            SecretArn: !Ref AppSecrets
 
   GoogleOAuthCallbackFunction:
     Type: AWS::Serverless::Function
@@ -137,7 +137,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref StateTable
         - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref GoogleOAuthSecret
+            SecretArn: !Ref AppSecrets
 
   AgentWorkerFunction:
     Type: AWS::Serverless::Function
@@ -147,6 +147,9 @@ Resources:
       CodeUri: ../src
       Timeout: 900
       MemorySize: 512
+      Environment:
+        Variables:
+          APP_SECRETS_ARN: !Ref AppSecrets
       Events:
         SQSTrigger:
           Type: SQS
@@ -159,14 +162,7 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref DocumentBucket
         - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref PineconeApiKeySecret
-        - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref GoogleOAuthSecret
-        - Statement:
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-              Resource: "*"
+            SecretArn: !Ref AppSecrets
 
   KillSwitchFunction:
     Type: AWS::Serverless::Function
@@ -202,7 +198,7 @@ Resources:
             Description: Daily Pinecone health check at 8 AM UTC
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref PineconeApiKeySecret
+            SecretArn: !Ref AppSecrets
 
   NudgeFunction:
     Type: AWS::Serverless::Function
@@ -220,7 +216,7 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref StateTable
         - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref SlackSigningSecret
+            SecretArn: !Ref AppSecrets
 
   # ============================================================
   # SQS
@@ -283,23 +279,11 @@ Resources:
   # ============================================================
   # Secrets Manager
   # ============================================================
-  PineconeApiKeySecret:
+  AppSecrets:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: onboard-assist/pinecone-api-key
-      Description: Pinecone API key
-
-  GoogleOAuthSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: onboard-assist/google-oauth
-      Description: Google OAuth client ID and secret
-
-  SlackSigningSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: onboard-assist/slack-signing-secret
-      Description: Slack signing secret and bot token
+      Name: onboard-assist/secrets
+      Description: Consolidated app secrets (Slack, Pinecone, Gemini, Google OAuth)
 
   # ============================================================
   # SNS + Budget Alarm

@@ -7,11 +7,11 @@ from llm.router import MODEL_PRICING, LLMRouter
 
 
 class TestModelPricing:
-    def test_nova_micro_pricing_exists(self):
-        assert "us.amazon.nova-micro-v1:0" in MODEL_PRICING
+    def test_flash_lite_pricing_exists(self):
+        assert "gemini-2.5-flash-lite" in MODEL_PRICING
 
-    def test_haiku_pricing_exists(self):
-        assert "us.anthropic.claude-3-5-haiku-20241022-v1:0" in MODEL_PRICING
+    def test_flash_pricing_exists(self):
+        assert "gemini-2.5-flash" in MODEL_PRICING
 
     def test_pricing_has_required_keys(self):
         for _model_id, pricing in MODEL_PRICING.items():
@@ -30,17 +30,17 @@ class TestLLMRouter:
             )
         return LLMRouter(
             provider=provider,
-            reasoning_model_id="us.amazon.nova-micro-v1:0",
-            generation_model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+            reasoning_model_id="gemini-2.5-flash-lite",
+            generation_model_id="gemini-2.5-flash",
         )
 
-    def test_reasoning_routes_to_nova_micro(self):
+    def test_reasoning_routes_to_flash_lite(self):
         mock = MagicMock()
         mock.invoke.return_value = LLMResponse(
             text="think",
             input_tokens=10,
             output_tokens=5,
-            model_id="us.amazon.nova-micro-v1:0",
+            model_id="gemini-2.5-flash-lite",
         )
         router = self._make_router(mock)
 
@@ -50,15 +50,15 @@ class TestLLMRouter:
         )
 
         call_kwargs = mock.invoke.call_args[1]
-        assert call_kwargs["model_id"] == "us.amazon.nova-micro-v1:0"
+        assert call_kwargs["model_id"] == "gemini-2.5-flash-lite"
 
-    def test_generation_routes_to_haiku(self):
+    def test_generation_routes_to_flash(self):
         mock = MagicMock()
         mock.invoke.return_value = LLMResponse(
             text="hello",
             input_tokens=10,
             output_tokens=5,
-            model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+            model_id="gemini-2.5-flash",
         )
         router = self._make_router(mock)
 
@@ -68,7 +68,7 @@ class TestLLMRouter:
         )
 
         call_kwargs = mock.invoke.call_args[1]
-        assert call_kwargs["model_id"] == "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+        assert call_kwargs["model_id"] == "gemini-2.5-flash"
 
     def test_tracks_cumulative_cost(self):
         mock = MagicMock()
@@ -76,7 +76,7 @@ class TestLLMRouter:
             text="x",
             input_tokens=1000,
             output_tokens=500,
-            model_id="us.amazon.nova-micro-v1:0",
+            model_id="gemini-2.5-flash-lite",
         )
         router = self._make_router(mock)
 

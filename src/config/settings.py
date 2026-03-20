@@ -42,10 +42,10 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     reasoning_model_id: str = Field(
-        default="us.amazon.nova-micro-v1:0", alias="REASONING_MODEL_ID"
+        default="gemini-2.5-flash-lite", alias="REASONING_MODEL_ID"
     )
     generation_model_id: str = Field(
-        default="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        default="gemini-2.5-flash",
         alias="GENERATION_MODEL_ID",
     )
 
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     max_workspace_monthly_tokens: int = Field(default=500000)
 
     # --- Kill Switch ---
-    kill_switch_threshold: float = Field(default=10.0)
+    kill_switch_threshold: float = Field(default=5.0)
     kill_switch_cache_ttl_seconds: int = Field(default=60)
 
     # --- Agent Worker ---
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     sqs_visibility_timeout: int = Field(default=900)
 
     # --- Slack ---
-    slack_signing_secret_arn: str = Field(default="", alias="SLACK_SIGNING_SECRET_ARN")
+    app_secrets_arn: str = Field(default="", alias="APP_SECRETS_ARN")
     rate_limit_window_seconds: int = Field(default=60)
     max_message_length: int = Field(default=4000)
     injection_strike_limit: int = Field(default=3)

@@ -45,7 +45,7 @@ class TestFallbackChain:
 
     def test_falls_back_on_primary_failure(self):
         chain, primary, fallback = self._make_chain(
-            primary_effect=Exception("Bedrock down"),
+            primary_effect=Exception("Provider down"),
         )
         result = chain.invoke(messages=[{"role": "user", "content": "hi"}])
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -161,6 +162,39 @@ class DynamoStateStore:
             return 0.0
         result: float = float(item.get("estimated_cost", 0.0))
         return result
+
+    def increment_usage(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        turns: int = 1,
+        output_tokens: int = 0,
+        tool_calls: int = 0,
+        estimated_cost: float = 0.0,
+    ) -> None:
+        """Increment daily usage counters atomically."""
+        today = date.today().isoformat()
+        self._table.update_item(
+            Key={
+                "pk": f"WORKSPACE#{workspace_id}",
+                "sk": f"USAGE#{user_id}#{today}",
+            },
+            UpdateExpression=(
+                "SET turns = if_not_exists(turns, :zero) + :t, "
+                "output_tokens = if_not_exists(output_tokens, :zero) + :ot, "
+                "tool_calls = if_not_exists(tool_calls, :zero) + :tc, "
+                "estimated_cost = if_not_exists(estimated_cost, :fzero) + :ec"
+            ),
+            ExpressionAttributeValues={
+                ":t": turns,
+                ":ot": output_tokens,
+                ":tc": tool_calls,
+                ":ec": Decimal(str(estimated_cost)),
+                ":zero": 0,
+                ":fzero": Decimal("0"),
+            },
+        )
 
     def log_injection_attempt(
         self,

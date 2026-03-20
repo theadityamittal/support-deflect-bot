@@ -67,6 +67,49 @@ class TestSlackEvent:
         assert event.user_id == "U999"
         assert event.text == ""
 
+    def test_subtype_parsed_from_event_body(self):
+        body = {
+            "event": {
+                "type": "message",
+                "user": "U123",
+                "channel": "C789",
+                "text": "Hello",
+                "subtype": "channel_join",
+                "event_ts": "123",
+            },
+            "event_id": "Ev004",
+            "team_id": "W456",
+        }
+        event = SlackEvent.from_event_body(body)
+        assert event.subtype == "channel_join"
+
+    def test_subtype_defaults_to_none(self):
+        body = {
+            "event": {
+                "type": "message",
+                "user": "U123",
+                "channel": "C789",
+                "text": "Hello",
+                "event_ts": "123",
+            },
+            "event_id": "Ev005",
+            "team_id": "W456",
+        }
+        event = SlackEvent.from_event_body(body)
+        assert event.subtype is None
+
+    def test_team_join_subtype_is_none(self):
+        body = {
+            "event": {
+                "type": "team_join",
+                "user": {"id": "U999", "name": "newuser"},
+            },
+            "event_id": "Ev006",
+            "team_id": "W456",
+        }
+        event = SlackEvent.from_event_body(body)
+        assert event.subtype is None
+
     def test_is_bot_message(self):
         event = SlackEvent(
             event_id="Ev001",

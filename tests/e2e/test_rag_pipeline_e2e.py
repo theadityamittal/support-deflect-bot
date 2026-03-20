@@ -17,12 +17,12 @@ from rag.pipeline import RAGPipeline
 SAMPLE_TEXT = (
     "Onboard Assist is a serverless Slack onboarding bot for nonprofits. "
     "It uses AWS Lambda, DynamoDB, and Pinecone for vector search. "
-    "The bot generates personalized onboarding plans using Amazon Bedrock. "
+    "The bot generates personalized onboarding plans using Google Gemini. "
     "New volunteers answer intake questions via Block Kit forms. "
     "The Plan+ReAct agent creates 5-8 step onboarding plans. "
     "Each step is executed via structured tool calls to Slack and Google Calendar. "
     "The system runs at $1-3 per month using a dual-model LLM router. "
-    "Nova Micro handles reasoning tasks while Claude Haiku handles generation. "
+    "Gemini Flash Lite handles reasoning tasks while Gemini Flash handles generation. "
     "A 6-layer middleware chain protects against prompt injection and abuse. "
     "Rate limiting uses DynamoDB conditional writes with 60-second TTL locks."
 )

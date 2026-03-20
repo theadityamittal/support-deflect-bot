@@ -44,7 +44,7 @@ class TestLLMProvider:
             text="hi",
             input_tokens=1000,
             output_tokens=500,
-            model_id="us.amazon.nova-micro-v1:0",
+            model_id="gemini-2.5-flash-lite",
         )
         cost = resp.estimated_cost(input_price_per_1m=0.035, output_price_per_1m=0.14)
         assert cost > 0
