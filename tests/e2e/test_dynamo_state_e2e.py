@@ -9,9 +9,12 @@ Run: .venv/bin/pytest tests/e2e/test_dynamo_state_e2e.py -v -m e2e --no-cov -s
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime
 
 import pytest
+from security.crypto import FieldEncryptor
 from state.dynamo import DynamoStateStore
+from state.models import SetupState
 
 from tests.e2e.conftest import E2E_WORKSPACE_ID
 
@@ -197,3 +200,169 @@ class TestKillSwitchE2E:
         state_store.set_kill_switch(active=False)
         assert state_store.get_kill_switch_status() is False
         print("  Kill switch lifecycle: off → on → off: OK")
+
+
+@pytest.mark.e2e
+class TestSecretsE2E:
+    """SECRETS record CRUD with real KMS encryption."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self, dynamodb_table):
+        yield
+        with contextlib.suppress(Exception):
+            dynamodb_table.delete_item(
+                Key={"pk": f"WORKSPACE#{E2E_WORKSPACE_ID}", "sk": "SECRETS"}
+            )
+
+    def test_secrets_encrypt_store_retrieve(self, state_store, kms_key_id):
+        encryptor = FieldEncryptor(kms_key_id=kms_key_id)
+        original = {"bot_token": "xoxb-e2e-secret", "google_refresh_token": "1//e2e"}
+
+        state_store.save_workspace_secrets(
+            workspace_id=E2E_WORKSPACE_ID,
+            secrets_blob=original,
+            encryptor=encryptor,
+        )
+
+        retrieved = state_store.get_workspace_secrets(
+            workspace_id=E2E_WORKSPACE_ID,
+            encryptor=encryptor,
+        )
+
+        assert retrieved is not None
+        assert retrieved["bot_token"] == "xoxb-e2e-secret"
+        assert retrieved["google_refresh_token"] == "1//e2e"
+        print(f"  Secrets roundtrip OK: {list(retrieved.keys())}")
+
+    def test_secrets_overwrite(self, state_store, kms_key_id):
+        encryptor = FieldEncryptor(kms_key_id=kms_key_id)
+
+        state_store.save_workspace_secrets(
+            workspace_id=E2E_WORKSPACE_ID,
+            secrets_blob={"bot_token": "old-token"},
+            encryptor=encryptor,
+        )
+        state_store.save_workspace_secrets(
+            workspace_id=E2E_WORKSPACE_ID,
+            secrets_blob={"bot_token": "new-token"},
+            encryptor=encryptor,
+        )
+
+        retrieved = state_store.get_workspace_secrets(
+            workspace_id=E2E_WORKSPACE_ID,
+            encryptor=encryptor,
+        )
+        assert retrieved is not None
+        assert retrieved["bot_token"] == "new-token"
+        print("  Secrets overwrite: second write wins")
+
+
+@pytest.mark.e2e
+class TestSetupStateE2E:
+    """Setup state lifecycle against real DynamoDB."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self, dynamodb_table):
+        yield
+        with contextlib.suppress(Exception):
+            dynamodb_table.delete_item(
+                Key={"pk": f"WORKSPACE#{E2E_WORKSPACE_ID}", "sk": "SETUP"}
+            )
+            dynamodb_table.delete_item(
+                Key={"pk": f"WORKSPACE#{E2E_WORKSPACE_ID}", "sk": "CONFIG"}
+            )
+
+    def test_setup_state_lifecycle(self, state_store):
+        now = datetime.now(UTC).isoformat()
+        setup = SetupState(
+            step="welcome",
+            admin_user_id="U_E2E_ADMIN",
+            workspace_id=E2E_WORKSPACE_ID,
+            website_url="",
+            scrape_manifest_key="",
+            teams=(),
+            channel_mapping={},
+            calendar_enabled=False,
+            created_at=now,
+            updated_at=now,
+        )
+
+        state_store.save_setup_state(setup_state=setup)
+
+        retrieved = state_store.get_setup_state(workspace_id=E2E_WORKSPACE_ID)
+        assert retrieved is not None
+        assert retrieved.step == "welcome"
+        assert retrieved.admin_user_id == "U_E2E_ADMIN"
+        print(f"  Setup state saved: step={retrieved.step}")
+
+        # Update step
+        updated = SetupState(
+            step="teams",
+            admin_user_id=retrieved.admin_user_id,
+            workspace_id=retrieved.workspace_id,
+            website_url="https://example.com",
+            scrape_manifest_key="",
+            teams=("Engineering", "Design"),
+            channel_mapping={},
+            calendar_enabled=False,
+            created_at=retrieved.created_at,
+            updated_at=datetime.now(UTC).isoformat(),
+        )
+        state_store.save_setup_state(setup_state=updated)
+
+        retrieved2 = state_store.get_setup_state(workspace_id=E2E_WORKSPACE_ID)
+        assert retrieved2 is not None
+        assert retrieved2.step == "teams"
+        assert "Engineering" in retrieved2.teams
+        print(f"  Setup state updated: step={retrieved2.step}")
+
+        # Delete
+        state_store.delete_setup_state(workspace_id=E2E_WORKSPACE_ID)
+        assert state_store.get_setup_state(workspace_id=E2E_WORKSPACE_ID) is None
+        print("  Setup state deleted")
+
+    def test_complete_setup_writes_config(self, state_store):
+        # Create workspace config with setup_complete=False
+        state_store.save_workspace_config(
+            workspace_id=E2E_WORKSPACE_ID,
+            team_name="E2E Test Team",
+            bot_token="xoxb-e2e",
+            bot_user_id="U_E2E_BOT",
+        )
+
+        # Create setup state
+        now = datetime.now(UTC).isoformat()
+        setup = SetupState(
+            step="confirmation",
+            admin_user_id="U_E2E_ADMIN",
+            workspace_id=E2E_WORKSPACE_ID,
+            website_url="https://example.com",
+            scrape_manifest_key="",
+            teams=("Engineering",),
+            channel_mapping={"Engineering": "C_ENG"},
+            calendar_enabled=False,
+            created_at=now,
+            updated_at=now,
+        )
+        state_store.save_setup_state(setup_state=setup)
+
+        # Complete setup
+        state_store.complete_setup(
+            workspace_id=E2E_WORKSPACE_ID,
+            config_updates={
+                "teams": ["Engineering"],
+                "channel_mapping": {"Engineering": "C_ENG"},
+                "calendar_enabled": False,
+            },
+        )
+
+        # Verify config updated
+        config = state_store.get_workspace_config(workspace_id=E2E_WORKSPACE_ID)
+        assert config is not None
+        assert config.setup_complete is True
+        assert "Engineering" in config.teams
+        print(f"  complete_setup: setup_complete={config.setup_complete}")
+
+        # Verify setup state deleted
+        assert state_store.get_setup_state(workspace_id=E2E_WORKSPACE_ID) is None
+        print("  Setup state cleaned up after complete_setup")
