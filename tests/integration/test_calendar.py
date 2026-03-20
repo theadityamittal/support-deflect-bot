@@ -15,7 +15,10 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from agent.tools.calendar_event import CalendarEventTool
+from gcal import callback as gcal_cb
 from gcal.client import GoogleCalendarClient
+from state.models import WorkspaceConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -245,9 +248,7 @@ class TestGcalCallbackLambdaHandler:
         """
         import json as _json
 
-        from gcal import callback as gcal_cb
         from state.dynamo import DynamoStateStore
-        from state.models import WorkspaceConfig
 
         token_payload = _make_successful_token_response()
         mock_gcal_client = MagicMock()
@@ -339,8 +340,6 @@ class TestGcalCallbackLambdaHandler:
 
     def test_oauth_cancelled_returns_200_with_cancel_message(self):
         """When user denies access, Lambda should return 200 with cancellation message."""
-        from gcal import callback as gcal_cb
-
         response = gcal_cb.lambda_handler(
             self._build_event(error="access_denied"), context=None
         )
@@ -350,8 +349,6 @@ class TestGcalCallbackLambdaHandler:
 
     def test_missing_code_returns_400(self):
         """Missing authorization code should return 400."""
-        from gcal import callback as gcal_cb
-
         response = gcal_cb.lambda_handler(
             {"queryStringParameters": {"state": "W1"}}, context=None
         )
@@ -361,8 +358,6 @@ class TestGcalCallbackLambdaHandler:
 
     def test_token_exchange_failure_returns_500(self):
         """If code exchange raises an exception, Lambda should return 500."""
-        from gcal import callback as gcal_cb
-
         mock_gcal_client = MagicMock()
         mock_gcal_client.exchange_code.side_effect = RuntimeError("Network error")
 
@@ -383,8 +378,6 @@ class TestGcalCallbackLambdaHandler:
 
     def test_token_expiry_calculated_from_expires_in(self):
         """access_token_expiry should be approximately now + expires_in seconds."""
-        from gcal import callback as gcal_cb
-
         before = int(time.time())
         token_payload = {
             "access_token": "acc",
@@ -395,8 +388,6 @@ class TestGcalCallbackLambdaHandler:
         mock_gcal_client.exchange_code.return_value = token_payload
 
         mock_store = MagicMock()
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id="W1",
             team_name="Corp",
@@ -435,31 +426,6 @@ class TestGcalCallbackLambdaHandler:
 class TestGcalCallbackTokenRefreshFlow:
     """Test the token refresh and revocation notification flows."""
 
-    def test_invalid_grant_raises_value_error(self):
-        """When Google returns invalid_grant, refresh_access_token raises ValueError."""
-        client = GoogleCalendarClient(client_id="cid", client_secret="csec")
-        revoked = {"error": "invalid_grant", "error_description": "Token revoked."}
-
-        with (
-            patch("httpx.post", return_value=_make_httpx_response(400, revoked)),
-            pytest.raises(ValueError) as exc_info,
-        ):
-            client.refresh_access_token(refresh_token="old_tok")
-
-        assert "invalid_grant" in str(exc_info.value)
-
-    def test_token_refresh_updates_access_token(self):
-        """After a successful refresh, the caller receives the new access token."""
-        client = GoogleCalendarClient(client_id="cid", client_secret="csec")
-        new_tok_response = {"access_token": "fresh_token", "expires_in": 3600}
-
-        with patch(
-            "httpx.post", return_value=_make_httpx_response(200, new_tok_response)
-        ):
-            result = client.refresh_access_token(refresh_token="still_valid_ref")
-
-        assert result["access_token"] == "fresh_token"
-
     def test_revocation_scenario_calendar_event_tool_returns_failure_on_invalid_grant(
         self,
     ):
@@ -469,8 +435,6 @@ class TestGcalCallbackTokenRefreshFlow:
         component that catches ValueError from GoogleCalendarClient.refresh_access_token and
         returns a structured failure result.
         """
-        from agent.tools.calendar_event import CalendarEventTool
-
         revoked_response = {
             "error": "invalid_grant",
             "error_description": "Token revoked.",

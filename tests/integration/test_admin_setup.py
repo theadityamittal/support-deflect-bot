@@ -7,11 +7,19 @@ and pending users enqueued.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 from admin.setup import SetupDependencies, process_setup_message
-from state.models import OnboardingPlan, PlanStatus, PlanStep, SetupState, StepStatus
+from state.models import (
+    OnboardingPlan,
+    PlanStatus,
+    PlanStep,
+    SetupState,
+    StepStatus,
+    WorkspaceConfig,
+)
 
 
 def _make_setup_state(**kwargs) -> SetupState:
@@ -37,9 +45,6 @@ def _make_deps(**kwargs) -> SetupDependencies:
     mock_encryptor = kwargs.pop("encryptor", MagicMock())
     mock_sqs = kwargs.pop("sqs_client", MagicMock())
     mock_lambda_ctx = kwargs.pop("lambda_context", None)
-
-    # Default: no pending users
-    mock_store.get_pending_users.return_value = []
 
     return SetupDependencies(
         state_store=mock_store,
@@ -388,8 +393,6 @@ class TestAdminSetupCalendarStep:
         )
         mock_store = MagicMock()
         # complete_setup needs get_workspace_config to return a config
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id="W_TEST",
             team_name="Test Corp",
@@ -420,8 +423,6 @@ class TestAdminSetupCalendarStep:
             channel_mapping={"engineering": "C_ENG"},
         )
         mock_store = MagicMock()
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id="W_TEST",
             team_name="Test Corp",
@@ -462,8 +463,6 @@ class TestAdminSetupConfirmationStep:
             calendar_enabled=False,
         )
         mock_store = MagicMock()
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id="W_TEST",
             team_name="Test Corp",
@@ -494,8 +493,6 @@ class TestAdminSetupConfirmationStep:
             calendar_enabled=True,
         )
         mock_store = MagicMock()
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id="W_TEST",
             team_name="Test Corp",
@@ -522,8 +519,6 @@ class TestAdminSetupConfirmationStep:
             channel_mapping={"engineering": "C001"},
         )
         mock_store = MagicMock()
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id="W_TEST",
             team_name="Test Corp",
@@ -540,18 +535,15 @@ class TestAdminSetupConfirmationStep:
         )
         mock_sqs = MagicMock()
         mock_slack = MagicMock()
+        mock_store.get_pending_users.return_value = [pending_plan]
         deps = _make_deps(
             state_store=mock_store, sqs_client=mock_sqs, slack_client=mock_slack
         )
-        # Override after _make_deps since it sets a default empty return value
-        mock_store.get_pending_users.return_value = [pending_plan]
 
         process_setup_message(text="", action_id=None, setup_state=state, deps=deps)
 
         mock_sqs.send_message.assert_called_once()
         sqs_body = mock_sqs.send_message.call_args.kwargs["MessageBody"]
-        import json
-
         payload = json.loads(sqs_body)
         assert payload["type"] == "onboard_user"
         assert payload["user_id"] == "U_PENDING"
@@ -565,8 +557,6 @@ class TestAdminSetupFullFlow:
         admin_id = "U_ADMIN_FULL"
 
         mock_store = MagicMock()
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id=workspace_id,
             team_name="Full Test Corp",
@@ -632,8 +622,6 @@ class TestAdminSetupFullFlow:
         admin_id = "U_ADMIN_CAL"
 
         mock_store = MagicMock()
-        from state.models import WorkspaceConfig
-
         mock_store.get_workspace_config.return_value = WorkspaceConfig(
             workspace_id=workspace_id,
             team_name="Calendar Corp",
