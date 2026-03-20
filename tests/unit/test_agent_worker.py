@@ -40,6 +40,7 @@ def _message_body(**overrides) -> dict:
 
 class TestLambdaHandler:
     @patch("agent.worker._release_user_lock")
+    @patch("agent.worker._get_setup_state", return_value=None)
     @patch("agent.worker._get_bot_token")
     @patch("agent.worker._create_orchestrator")
     @patch("agent.worker.SlackClient")
@@ -50,6 +51,7 @@ class TestLambdaHandler:
         mock_slack_client_cls,
         mock_create_orch,
         mock_get_token,
+        mock_get_setup,
         mock_release,
     ):
         mock_get_token.return_value = "xoxb-fake"
@@ -70,6 +72,7 @@ class TestLambdaHandler:
         mock_release.assert_called_once_with(workspace_id="W1", user_id="U1")
 
     @patch("agent.worker._release_user_lock")
+    @patch("agent.worker._get_setup_state", return_value=None)
     @patch("agent.worker._get_bot_token")
     @patch("agent.worker._create_orchestrator")
     @patch("agent.worker.SlackClient")
@@ -80,6 +83,7 @@ class TestLambdaHandler:
         mock_slack_client_cls,
         mock_create_orch,
         mock_get_token,
+        mock_get_setup,
         mock_release,
     ):
         mock_get_token.return_value = "xoxb-fake"

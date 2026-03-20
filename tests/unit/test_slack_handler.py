@@ -61,8 +61,9 @@ class TestSlackHandlerLambda:
     @patch("slack.handler.verify_slack_signature")
     @patch("slack.handler._enqueue_to_sqs")
     @patch("slack.handler._build_middleware_chain")
+    @patch("slack.handler._check_setup_gating", return_value=None)
     def test_event_passes_middleware_and_enqueues(
-        self, mock_chain_builder, mock_enqueue, mock_verify, mock_secret
+        self, mock_gating, mock_chain_builder, mock_enqueue, mock_verify, mock_secret
     ):
         mock_secret.return_value = "secret"
         mock_chain = MagicMock()
@@ -78,8 +79,9 @@ class TestSlackHandlerLambda:
     @patch("slack.handler.verify_slack_signature")
     @patch("slack.handler._send_ephemeral_rejection")
     @patch("slack.handler._build_middleware_chain")
+    @patch("slack.handler._check_setup_gating", return_value=None)
     def test_reject_sends_ephemeral(
-        self, mock_chain_builder, mock_ephemeral, mock_verify, mock_secret
+        self, mock_gating, mock_chain_builder, mock_ephemeral, mock_verify, mock_secret
     ):
         """When middleware rejects with should_respond=True, send ephemeral."""
         mock_secret.return_value = "secret"
@@ -103,8 +105,9 @@ class TestSlackHandlerLambda:
     @patch("slack.handler.verify_slack_signature")
     @patch("slack.handler._send_ephemeral_rejection")
     @patch("slack.handler._build_middleware_chain")
+    @patch("slack.handler._check_setup_gating", return_value=None)
     def test_drop_does_not_send_ephemeral(
-        self, mock_chain_builder, mock_ephemeral, mock_verify, mock_secret
+        self, mock_gating, mock_chain_builder, mock_ephemeral, mock_verify, mock_secret
     ):
         """When middleware drops (should_respond=False), no ephemeral sent."""
         mock_secret.return_value = "secret"
