@@ -8,6 +8,7 @@ Run: .venv/bin/pytest tests/e2e/test_slack_handler_e2e.py -v -m e2e --no-cov -s
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from urllib.parse import urlencode
@@ -16,6 +17,7 @@ import httpx
 import pytest
 
 from tests.e2e.conftest import (
+    E2E_TEST_WORKSPACE_NOCONFIG,
     E2E_WORKSPACE_ID,
     cleanup_dynamodb_test_records,
     get_sqs_depth,
@@ -191,3 +193,130 @@ class TestSlackHandlerE2E:
         depth_after = get_sqs_depth(sqs_queue_url)
         print(f"  SQS depth: {depth_before} → {depth_after}")
         assert depth_after == depth_before, "Bot message should NOT be enqueued"
+
+
+@pytest.mark.e2e
+class TestSetupGatingE2E:
+    """Tests for setup_complete gating on unconfigured workspaces."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self, dynamodb_table):
+        yield
+        pk = f"WORKSPACE#{E2E_TEST_WORKSPACE_NOCONFIG}"
+        with contextlib.suppress(Exception):
+            response = dynamodb_table.query(
+                KeyConditionExpression="pk = :pk",
+                ExpressionAttributeValues={":pk": pk},
+            )
+            for item in response.get("Items", []):
+                dynamodb_table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+
+    def test_message_blocked_when_setup_incomplete(
+        self, api_base_url, signing_secret, dynamodb_table
+    ):
+        """Message to unconfigured workspace should NOT be enqueued."""
+        # Seed a workspace config with setup_complete=False
+        dynamodb_table.put_item(
+            Item={
+                "pk": f"WORKSPACE#{E2E_TEST_WORKSPACE_NOCONFIG}",
+                "sk": "CONFIG",
+                "workspace_id": E2E_TEST_WORKSPACE_NOCONFIG,
+                "team_name": "E2E Noconfig Team",
+                "bot_token": "xoxb-e2e-noconfig",
+                "bot_user_id": "U_E2E_BOT_NC",
+                "setup_complete": False,
+                "active": True,
+            }
+        )
+
+        body = {
+            "type": "event_callback",
+            "event_id": f"Ev_E2E_GATE_{int(time.time())}",
+            "team_id": E2E_TEST_WORKSPACE_NOCONFIG,
+            "event": {
+                "type": "message",
+                "user": "U_E2E_NONADMIN",
+                "text": "Hello, I need help",
+                "channel": "D_E2E_GATE",
+                "ts": f"{int(time.time())}.000001",
+            },
+        }
+        body_str = json.dumps(body)
+        headers = sign_request(body_str, signing_secret)
+
+        response = httpx.post(
+            f"{api_base_url}/slack/events",
+            content=body_str,
+            headers=headers,
+            timeout=15,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        # Setup-gated responses do NOT return {"ok": true}
+        assert data.get("ok") is not True
+        print(f"  Setup gating blocked: {data}")
+
+
+@pytest.mark.e2e
+class TestNewSlashCommandsE2E:
+    """Tests for /onboard-setup and /onboard-calendar commands."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self, dynamodb_table):
+        yield
+        cleanup_dynamodb_test_records(dynamodb_table)
+
+    def test_slash_command_onboard_setup(self, api_base_url, signing_secret):
+        """/onboard-setup should return setup instructions."""
+        body = {
+            "command": "/onboard-setup",
+            "user_id": "U_E2E_ADMIN",
+            "team_id": E2E_WORKSPACE_ID,
+            "channel_id": "C_E2E_TEST",
+            "trigger_id": "e2e_trigger",
+            "text": "",
+            "response_url": "https://hooks.slack.com/commands/test",
+        }
+        body_str = urlencode(body)
+        headers = sign_request(body_str, signing_secret)
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+
+        response = httpx.post(
+            f"{api_base_url}/slack/commands",
+            content=body_str,
+            headers=headers,
+            timeout=15,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "setup" in data["text"].lower()
+        print(f"  /onboard-setup response: {data['text'][:100]}...")
+
+    def test_slash_command_onboard_calendar(self, api_base_url, signing_secret):
+        """/onboard-calendar should return calendar info."""
+        body = {
+            "command": "/onboard-calendar",
+            "user_id": "U_E2E_ADMIN",
+            "team_id": E2E_WORKSPACE_ID,
+            "channel_id": "C_E2E_TEST",
+            "trigger_id": "e2e_trigger",
+            "text": "",
+            "response_url": "https://hooks.slack.com/commands/test",
+        }
+        body_str = urlencode(body)
+        headers = sign_request(body_str, signing_secret)
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+
+        response = httpx.post(
+            f"{api_base_url}/slack/commands",
+            content=body_str,
+            headers=headers,
+            timeout=15,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "calendar" in data["text"].lower()
+        print(f"  /onboard-calendar response: {data['text'][:100]}...")
