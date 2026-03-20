@@ -11,6 +11,7 @@ from state.models import (
     OnboardingPlan,
     PlanStatus,
     PlanStep,
+    SetupState,
     StepStatus,
 )
 
@@ -295,3 +296,229 @@ class TestSecretsRecord:
         update_call = update_calls[0][1]
         assert update_call["Key"] == {"pk": "WORKSPACE#W1", "sk": "CONFIG"}
         assert "bot_token" in update_call["UpdateExpression"]
+
+
+class TestSetupState:
+    def _make_store(self, mock_table=None):
+        table = mock_table or MagicMock()
+        return DynamoStateStore(table=table)
+
+    def _make_setup_state(self, **overrides):
+        defaults = {
+            "step": "welcome",
+            "admin_user_id": "U_ADMIN",
+            "workspace_id": "W1",
+            "website_url": "https://example.com",
+            "scrape_manifest_key": "",
+            "teams": ("eng", "sales"),
+            "channel_mapping": {"eng": "C_ENG"},
+            "calendar_enabled": False,
+            "created_at": "2026-01-01T00:00:00",
+            "updated_at": "2026-01-01T00:00:00",
+        }
+        defaults.update(overrides)
+        return SetupState(**defaults)
+
+    def test_save_setup_state(self):
+        mock_table = MagicMock()
+        store = self._make_store(mock_table)
+        setup = self._make_setup_state()
+
+        store.save_setup_state(setup_state=setup)
+
+        mock_table.put_item.assert_called_once()
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["pk"] == "WORKSPACE#W1"
+        assert item["sk"] == "SETUP"
+        assert item["step"] == "welcome"
+        assert item["admin_user_id"] == "U_ADMIN"
+        assert "ttl" in item
+
+    def test_get_setup_state(self):
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {
+            "Item": {
+                "pk": "WORKSPACE#W1",
+                "sk": "SETUP",
+                "step": "awaiting_url",
+                "admin_user_id": "U_ADMIN",
+                "workspace_id": "W1",
+                "website_url": "https://acme.com",
+                "scrape_manifest_key": "",
+                "teams": ["eng"],
+                "channel_mapping": {"eng": "C_ENG"},
+                "calendar_enabled": False,
+                "created_at": "2026-01-01T00:00:00",
+                "updated_at": "2026-01-01T00:00:00",
+            }
+        }
+        store = self._make_store(mock_table)
+
+        result = store.get_setup_state(workspace_id="W1")
+
+        assert result is not None
+        assert isinstance(result, SetupState)
+        assert result.step == "awaiting_url"
+        assert result.admin_user_id == "U_ADMIN"
+        assert result.workspace_id == "W1"
+        assert result.teams == ("eng",)
+        assert result.channel_mapping == {"eng": "C_ENG"}
+
+    def test_get_setup_state_nonexistent_returns_none(self):
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
+        store = self._make_store(mock_table)
+
+        result = store.get_setup_state(workspace_id="W1")
+
+        assert result is None
+
+    def test_delete_setup_state(self):
+        mock_table = MagicMock()
+        store = self._make_store(mock_table)
+
+        store.delete_setup_state(workspace_id="W1")
+
+        mock_table.delete_item.assert_called_once_with(
+            Key={"pk": "WORKSPACE#W1", "sk": "SETUP"}
+        )
+
+    def test_setup_state_has_7_day_ttl(self):
+        mock_table = MagicMock()
+        store = self._make_store(mock_table)
+        setup = self._make_setup_state()
+
+        before = int(time.time())
+        store.save_setup_state(setup_state=setup)
+        after = int(time.time())
+
+        item = mock_table.put_item.call_args[1]["Item"]
+        expected_min = before + (7 * 86400)
+        expected_max = after + (7 * 86400)
+        assert expected_min <= item["ttl"] <= expected_max
+
+
+class TestPendingUsers:
+    def _make_store(self, mock_table=None):
+        table = mock_table or MagicMock()
+        return DynamoStateStore(table=table)
+
+    def _make_plan_item(self, user_id: str, status: str) -> dict:
+        return {
+            "pk": "WORKSPACE#W1",
+            "sk": f"PLAN#{user_id}",
+            "workspace_id": "W1",
+            "user_id": user_id,
+            "user_name": "Test User",
+            "role": "member",
+            "status": status,
+            "plan": {"version": 1, "steps": []},
+            "context": {"key_facts": [], "recent_messages": []},
+        }
+
+    def test_get_pending_users_returns_matching_plans(self):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {
+            "Items": [
+                self._make_plan_item("U1", "pending_setup"),
+                self._make_plan_item("U2", "pending_setup"),
+            ]
+        }
+        store = self._make_store(mock_table)
+
+        result = store.get_pending_users(workspace_id="W1")
+
+        assert len(result) == 2
+        assert all(isinstance(p, OnboardingPlan) for p in result)
+        assert result[0].user_id == "U1"
+        assert result[1].user_id == "U2"
+
+    def test_get_pending_users_empty_when_none(self):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        store = self._make_store(mock_table)
+
+        result = store.get_pending_users(workspace_id="W1")
+
+        assert result == []
+
+
+class TestWorkspaceConfigUpdates:
+    def _make_store(self, mock_table=None):
+        table = mock_table or MagicMock()
+        return DynamoStateStore(table=table)
+
+    def test_save_config_with_new_fields(self):
+        mock_table = MagicMock()
+        store = self._make_store(mock_table)
+
+        store.save_workspace_config(
+            workspace_id="W1",
+            team_name="Acme",
+            bot_token=None,
+            bot_user_id="U_BOT",
+            admin_user_id="U_ADMIN",
+            setup_complete=True,
+            website_url="https://acme.com",
+            teams=("eng", "sales"),
+            channel_mapping={"eng": "C_ENG"},
+            calendar_enabled=True,
+        )
+
+        mock_table.put_item.assert_called_once()
+        item = mock_table.put_item.call_args[1]["Item"]
+        assert item["pk"] == "WORKSPACE#W1"
+        assert item["sk"] == "CONFIG"
+        assert item["admin_user_id"] == "U_ADMIN"
+        assert item["setup_complete"] is True
+        assert item["website_url"] == "https://acme.com"
+        assert item["teams"] == ["eng", "sales"]
+        assert item["channel_mapping"] == {"eng": "C_ENG"}
+        assert item["calendar_enabled"] is True
+
+    def test_complete_setup_writes_config_deletes_setup(self):
+        mock_table = MagicMock()
+        # existing CONFIG record
+        mock_table.get_item.return_value = {
+            "Item": {
+                "pk": "WORKSPACE#W1",
+                "sk": "CONFIG",
+                "workspace_id": "W1",
+                "team_name": "Acme",
+                "bot_token": None,
+                "bot_user_id": "U_BOT",
+                "active": True,
+                "admin_user_id": "",
+                "setup_complete": False,
+                "website_url": "",
+                "teams": [],
+                "channel_mapping": {},
+                "calendar_enabled": False,
+                "updated_at": 1000,
+            }
+        }
+        store = self._make_store(mock_table)
+
+        store.complete_setup(
+            workspace_id="W1",
+            config_updates={
+                "admin_user_id": "U_ADMIN",
+                "website_url": "https://acme.com",
+                "teams": ["eng"],
+                "channel_mapping": {"eng": "C_ENG"},
+                "calendar_enabled": False,
+            },
+        )
+
+        # CONFIG should be updated (put_item called)
+        put_calls = mock_table.put_item.call_args_list
+        config_puts = [c for c in put_calls if c[1]["Item"].get("sk") == "CONFIG"]
+        assert len(config_puts) == 1
+        config_item = config_puts[0][1]["Item"]
+        assert config_item["setup_complete"] is True
+        assert config_item["admin_user_id"] == "U_ADMIN"
+
+        # SETUP record should be deleted
+        mock_table.delete_item.assert_called_once_with(
+            Key={"pk": "WORKSPACE#W1", "sk": "SETUP"}
+        )

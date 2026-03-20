@@ -22,6 +22,7 @@ class PlanStatus(Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+    PENDING_SETUP = "pending_setup"
 
 
 @dataclass(frozen=True)
@@ -188,11 +189,33 @@ class UsageRecord:
 
 
 @dataclass(frozen=True)
+class SetupState:
+    """Transient admin setup state stored in DynamoDB (7-day TTL)."""
+
+    step: str  # e.g. "welcome", "awaiting_url", "scraping", "teams", "channels", "calendar", "confirmation"
+    admin_user_id: str
+    workspace_id: str
+    website_url: str = ""
+    scrape_manifest_key: str = ""
+    teams: tuple[str, ...] = ()
+    channel_mapping: dict[str, str] = field(default_factory=dict)
+    calendar_enabled: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
 class WorkspaceConfig:
     """Workspace configuration stored in DynamoDB."""
 
     workspace_id: str
     team_name: str
-    bot_token: str
     bot_user_id: str
+    bot_token: str | None = None
     active: bool = True
+    admin_user_id: str = ""
+    setup_complete: bool = False
+    website_url: str = ""
+    teams: tuple[str, ...] = ()
+    channel_mapping: dict[str, str] = field(default_factory=dict)
+    calendar_enabled: bool = False

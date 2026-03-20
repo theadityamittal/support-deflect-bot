@@ -10,8 +10,14 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from botocore.exceptions import ClientError
-from state.models import CompletionRecord, OnboardingPlan, WorkspaceConfig
-from state.ttl import ttl_for_injection_log, ttl_for_lock, ttl_for_plan, ttl_for_secrets
+from state.models import CompletionRecord, OnboardingPlan, SetupState, WorkspaceConfig
+from state.ttl import (
+    ttl_for_injection_log,
+    ttl_for_lock,
+    ttl_for_plan,
+    ttl_for_secrets,
+    ttl_for_setup,
+)
 
 if TYPE_CHECKING:
     from security.crypto import FieldEncryptor
@@ -104,22 +110,34 @@ class DynamoStateStore:
         *,
         workspace_id: str,
         team_name: str,
-        bot_token: str,
         bot_user_id: str,
+        bot_token: str | None = None,
+        admin_user_id: str = "",
+        setup_complete: bool = False,
+        website_url: str = "",
+        teams: tuple[str, ...] = (),
+        channel_mapping: dict[str, Any] | None = None,
+        calendar_enabled: bool = False,
     ) -> None:
         """Save workspace configuration (upsert)."""
-        self._table.put_item(
-            Item={
-                "pk": f"WORKSPACE#{workspace_id}",
-                "sk": "CONFIG",
-                "workspace_id": workspace_id,
-                "team_name": team_name,
-                "bot_token": bot_token,
-                "bot_user_id": bot_user_id,
-                "active": True,
-                "updated_at": int(time.time()),
-            }
-        )
+        item: dict[str, Any] = {
+            "pk": f"WORKSPACE#{workspace_id}",
+            "sk": "CONFIG",
+            "workspace_id": workspace_id,
+            "team_name": team_name,
+            "bot_user_id": bot_user_id,
+            "active": True,
+            "admin_user_id": admin_user_id,
+            "setup_complete": setup_complete,
+            "website_url": website_url,
+            "teams": list(teams),
+            "channel_mapping": channel_mapping if channel_mapping is not None else {},
+            "calendar_enabled": calendar_enabled,
+            "updated_at": int(time.time()),
+        }
+        if bot_token is not None:
+            item["bot_token"] = bot_token
+        self._table.put_item(Item=item)
 
     def get_workspace_config(self, *, workspace_id: str) -> WorkspaceConfig | None:
         """Retrieve workspace configuration."""
@@ -132,9 +150,15 @@ class DynamoStateStore:
         return WorkspaceConfig(
             workspace_id=item["workspace_id"],
             team_name=item.get("team_name", ""),
-            bot_token=item.get("bot_token", ""),
+            bot_token=item.get("bot_token"),
             bot_user_id=item.get("bot_user_id", ""),
             active=item.get("active", True),
+            admin_user_id=item.get("admin_user_id", ""),
+            setup_complete=item.get("setup_complete", False),
+            website_url=item.get("website_url", ""),
+            teams=tuple(item.get("teams", [])),
+            channel_mapping=dict(item.get("channel_mapping", {})),
+            calendar_enabled=item.get("calendar_enabled", False),
         )
 
     def get_daily_usage_turns(self, *, workspace_id: str, user_id: str) -> int:
@@ -275,3 +299,89 @@ class DynamoStateStore:
             Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "CONFIG"},
             UpdateExpression="REMOVE bot_token",
         )
+
+    def save_setup_state(self, *, setup_state: SetupState) -> None:
+        """Save or update admin setup state with 7-day TTL."""
+        self._table.put_item(
+            Item={
+                "pk": f"WORKSPACE#{setup_state.workspace_id}",
+                "sk": "SETUP",
+                "workspace_id": setup_state.workspace_id,
+                "step": setup_state.step,
+                "admin_user_id": setup_state.admin_user_id,
+                "website_url": setup_state.website_url,
+                "scrape_manifest_key": setup_state.scrape_manifest_key,
+                "teams": list(setup_state.teams),
+                "channel_mapping": dict(setup_state.channel_mapping),
+                "calendar_enabled": setup_state.calendar_enabled,
+                "created_at": setup_state.created_at,
+                "updated_at": setup_state.updated_at,
+                "ttl": ttl_for_setup(),
+            }
+        )
+
+    def get_setup_state(self, *, workspace_id: str) -> SetupState | None:
+        """Retrieve admin setup state. Returns None if not found."""
+        response = self._table.get_item(
+            Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "SETUP"}
+        )
+        item = response.get("Item")
+        if not item:
+            return None
+        return SetupState(
+            step=item["step"],
+            admin_user_id=item["admin_user_id"],
+            workspace_id=item["workspace_id"],
+            website_url=item.get("website_url", ""),
+            scrape_manifest_key=item.get("scrape_manifest_key", ""),
+            teams=tuple(item.get("teams", [])),
+            channel_mapping=dict(item.get("channel_mapping", {})),
+            calendar_enabled=item.get("calendar_enabled", False),
+            created_at=item.get("created_at", ""),
+            updated_at=item.get("updated_at", ""),
+        )
+
+    def delete_setup_state(self, *, workspace_id: str) -> None:
+        """Delete the admin setup state record."""
+        self._table.delete_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "SETUP"})
+
+    def complete_setup(
+        self, *, workspace_id: str, config_updates: dict[str, Any]
+    ) -> None:
+        """Update WorkspaceConfig with final values, set setup_complete=True, delete SETUP record."""
+        config = self.get_workspace_config(workspace_id=workspace_id)
+        if config is None:
+            raise ValueError(f"No WorkspaceConfig found for workspace {workspace_id}")
+
+        self.save_workspace_config(
+            workspace_id=workspace_id,
+            team_name=config.team_name,
+            bot_user_id=config.bot_user_id,
+            bot_token=config.bot_token,
+            setup_complete=True,
+            admin_user_id=config_updates.get("admin_user_id", config.admin_user_id),
+            website_url=config_updates.get("website_url", config.website_url),
+            teams=tuple(config_updates.get("teams", list(config.teams))),
+            channel_mapping=config_updates.get(
+                "channel_mapping", dict(config.channel_mapping)
+            ),
+            calendar_enabled=config_updates.get(
+                "calendar_enabled", config.calendar_enabled
+            ),
+        )
+        self.delete_setup_state(workspace_id=workspace_id)
+
+    def get_pending_users(self, *, workspace_id: str) -> list[OnboardingPlan]:
+        """Query for onboarding plans with status='pending_setup'."""
+        from boto3.dynamodb.conditions import Attr
+        from boto3.dynamodb.conditions import Key as DynamoKey
+
+        response = self._table.query(
+            KeyConditionExpression=(
+                DynamoKey("pk").eq(f"WORKSPACE#{workspace_id}")
+                & DynamoKey("sk").begins_with("PLAN#")
+            ),
+            FilterExpression=Attr("status").eq("pending_setup"),
+        )
+        items = response.get("Items", [])
+        return [OnboardingPlan.from_dynamo_item(item) for item in items]

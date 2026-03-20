@@ -50,3 +50,8 @@ def ttl_for_injection_log() -> int:
 def ttl_for_secrets() -> int:
     """90-day TTL for workspace secrets records."""
     return int(time.time()) + (90 * _SECONDS_PER_DAY)
+
+
+def ttl_for_setup() -> int:
+    """7-day TTL for admin setup state records."""
+    return int(time.time()) + (7 * _SECONDS_PER_DAY)
