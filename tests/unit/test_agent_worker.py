@@ -39,10 +39,13 @@ def _message_body(**overrides) -> dict:
 
 
 class TestLambdaHandler:
+    @patch("agent.worker._release_user_lock")
     @patch("agent.worker._send_slack_message")
     @patch("agent.worker._get_bot_token")
     @patch("agent.worker._create_orchestrator")
-    def test_processes_sqs_message(self, mock_create_orch, mock_get_token, mock_send):
+    def test_processes_sqs_message(
+        self, mock_create_orch, mock_get_token, mock_send, mock_release
+    ):
         mock_get_token.return_value = "xoxb-fake"
         mock_orch = MagicMock()
         mock_orch.process_turn.return_value = "Hello volunteer!"
@@ -56,12 +59,14 @@ class TestLambdaHandler:
         mock_send.assert_called_once_with(
             bot_token="xoxb-fake", channel_id="C1", text="Hello volunteer!"
         )
+        mock_release.assert_called_once_with(workspace_id="W1", user_id="U1")
 
+    @patch("agent.worker._release_user_lock")
     @patch("agent.worker._send_slack_message")
     @patch("agent.worker._get_bot_token")
     @patch("agent.worker._create_orchestrator")
     def test_handles_orchestrator_error(
-        self, mock_create_orch, mock_get_token, mock_send
+        self, mock_create_orch, mock_get_token, mock_send, mock_release
     ):
         mock_get_token.return_value = "xoxb-fake"
         mock_orch = MagicMock()
@@ -73,6 +78,7 @@ class TestLambdaHandler:
 
         assert result["statusCode"] == 500
         mock_send.assert_not_called()
+        mock_release.assert_called_once_with(workspace_id="W1", user_id="U1")
 
     @patch("agent.worker._send_slack_message")
     @patch("agent.worker._get_bot_token")

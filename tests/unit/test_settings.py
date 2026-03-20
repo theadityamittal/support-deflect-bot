@@ -48,7 +48,7 @@ class TestSettings:
         settings = Settings()
         assert settings.max_turns_per_day == 50
         assert settings.max_workspace_monthly_cost == 5.0
-        assert settings.kill_switch_threshold == 10.0
+        assert settings.kill_switch_threshold == 5.0
 
     def test_per_turn_budget_defaults(self, monkeypatch):
         """Per-turn budget limits match spec."""

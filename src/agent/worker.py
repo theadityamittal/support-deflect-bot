@@ -73,28 +73,47 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
             logger.debug("Orchestrator created successfully")
 
-            logger.debug("Starting process_turn")
-            response_text = orchestrator.process_turn(user_message=text)
-            logger.debug(
-                "process_turn complete, response length=%d, preview=%s",
-                len(response_text),
-                response_text[:200],
-            )
+            try:
+                logger.debug("Starting process_turn")
+                response_text = orchestrator.process_turn(user_message=text)
+                logger.debug(
+                    "process_turn complete, response length=%d, preview=%s",
+                    len(response_text),
+                    response_text[:200],
+                )
 
-            logger.debug("Sending Slack message to channel=%s", channel_id)
-            _send_slack_message(
-                bot_token=bot_token,
-                channel_id=channel_id,
-                text=response_text,
-            )
+                logger.debug("Sending Slack message to channel=%s", channel_id)
+                _send_slack_message(
+                    bot_token=bot_token,
+                    channel_id=channel_id,
+                    text=response_text,
+                )
 
-            logger.info("Response sent to %s/%s", workspace_id, user_id)
+                logger.info("Response sent to %s/%s", workspace_id, user_id)
+            finally:
+                _release_user_lock(workspace_id=workspace_id, user_id=user_id)
 
         except Exception:
             logger.exception("Failed to process SQS message")
             return {"statusCode": 500, "body": "Processing failed"}
 
     return {"statusCode": 200, "body": "OK"}
+
+
+def _release_user_lock(*, workspace_id: str, user_id: str) -> None:
+    """Release the per-user processing lock in DynamoDB."""
+    try:
+        from state.dynamo import DynamoStateStore
+
+        table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
+        table = boto3.resource("dynamodb").Table(table_name)
+        store = DynamoStateStore(table=table)
+        store.release_lock(workspace_id=workspace_id, user_id=user_id)
+        logger.debug("Released lock for workspace=%s user=%s", workspace_id, user_id)
+    except Exception:
+        logger.exception(
+            "Failed to release lock for workspace=%s user=%s", workspace_id, user_id
+        )
 
 
 def _get_bot_token(workspace_id: str) -> str:
