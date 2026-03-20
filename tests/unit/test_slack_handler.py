@@ -402,3 +402,105 @@ class TestSetupGating:
             workspace_id="W456",
             user_id="UNEW",
         )
+
+
+class TestGetSigningSecret:
+    @patch.dict(
+        "os.environ", {"APP_SECRETS_ARN": "", "SLACK_SIGNING_SECRET": "env-secret"}
+    )
+    def test_returns_from_env_when_no_arn(self):
+        from slack.handler import _get_signing_secret
+
+        assert _get_signing_secret() == "env-secret"
+
+    @patch("slack.handler.boto3")
+    @patch.dict("os.environ", {"APP_SECRETS_ARN": "arn:aws:sm:test"})
+    def test_returns_from_secrets_manager(self, mock_boto3):
+        from slack.handler import _get_signing_secret
+
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.get_secret_value.return_value = {
+            "SecretString": json.dumps({"signing_secret": "sm-secret"})
+        }
+        assert _get_signing_secret() == "sm-secret"
+
+    @patch("slack.handler.boto3")
+    @patch.dict("os.environ", {"APP_SECRETS_ARN": "arn:aws:sm:test"})
+    def test_returns_raw_string_on_json_error(self, mock_boto3):
+        from slack.handler import _get_signing_secret
+
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.get_secret_value.return_value = {"SecretString": "plain-secret"}
+        assert _get_signing_secret() == "plain-secret"
+
+
+class TestEnqueueToSqs:
+    @patch("slack.handler.boto3")
+    @patch.dict("os.environ", {"SQS_QUEUE_URL": "https://sqs.test/queue.fifo"})
+    def test_sends_message_to_sqs(self, mock_boto3):
+        from slack.handler import _enqueue_to_sqs
+        from slack.models import EventType, SQSMessage
+
+        mock_sqs = MagicMock()
+        mock_boto3.client.return_value = mock_sqs
+
+        msg = SQSMessage(
+            version="1.0",
+            event_id="Ev1",
+            workspace_id="W1",
+            user_id="U1",
+            channel_id="C1",
+            event_type=EventType.MESSAGE,
+            text="hi",
+            timestamp="2026-01-01T00:00:00Z",
+        )
+        _enqueue_to_sqs(msg)
+        mock_sqs.send_message.assert_called_once()
+
+    @patch("slack.handler.boto3")
+    @patch.dict("os.environ", {"SQS_QUEUE_URL": ""})
+    def test_skips_when_no_queue_url(self, mock_boto3):
+        from slack.handler import _enqueue_to_sqs
+        from slack.models import EventType, SQSMessage
+
+        msg = SQSMessage(
+            version="1.0",
+            event_id="Ev1",
+            workspace_id="W1",
+            user_id="U1",
+            channel_id="C1",
+            event_type=EventType.MESSAGE,
+            text="hi",
+            timestamp="2026-01-01T00:00:00Z",
+        )
+        _enqueue_to_sqs(msg)
+        mock_boto3.client.assert_not_called()
+
+
+class TestSendSetupPendingDm:
+    @patch("slack.handler.SlackClient")
+    @patch("slack.handler.WebClient")
+    @patch("slack.handler._get_bot_token_for_workspace", return_value="xoxb-test")
+    def test_sends_dm_on_success(self, mock_get_token, mock_wc_cls, mock_sc_cls):
+        from slack.handler import _send_setup_pending_dm
+
+        mock_slack = MagicMock()
+        mock_sc_cls.return_value = mock_slack
+
+        _send_setup_pending_dm(workspace_id="W1", user_id="U1")
+
+        mock_slack.send_message.assert_called_once()
+        call_kwargs = mock_slack.send_message.call_args.kwargs
+        assert call_kwargs["channel"] == "U1"
+        assert "setting up" in call_kwargs["text"].lower()
+
+    @patch(
+        "slack.handler._get_bot_token_for_workspace", side_effect=ValueError("no token")
+    )
+    def test_skips_when_no_token(self, mock_get_token):
+        from slack.handler import _send_setup_pending_dm
+
+        # Should not raise
+        _send_setup_pending_dm(workspace_id="W1", user_id="U1")
