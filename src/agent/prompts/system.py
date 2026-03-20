@@ -7,6 +7,14 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from state.models import OnboardingPlan
 
+CALENDAR_INSTRUCTIONS = """
+## Calendar Integration
+You have access to the calendar_event tool to schedule meetings and events.
+- Use it to schedule orientations, training sessions, and check-ins
+- Always confirm event details (title, date, time, duration) with the volunteer before creating
+- After creating an event, use send_message with blocks_type='calendar_confirmation' to show the details
+"""
+
 SYSTEM_BASE = """You are Onboard Assist, a friendly onboarding bot for nonprofit volunteers.
 
 Your job:
@@ -34,12 +42,25 @@ Respond warmly and ask your first question."""
 
 
 def build_system_context(
-    *, plan: OnboardingPlan | None, user_message: str
+    *,
+    plan: OnboardingPlan | None,
+    user_message: str,
+    calendar_enabled: bool = False,
 ) -> list[dict[str, Any]]:
-    """Build the message list for a reasoning call."""
+    """Build the message list for a reasoning call.
+
+    Args:
+        plan: The volunteer's current onboarding plan, or None for intake.
+        user_message: The latest message from the volunteer.
+        calendar_enabled: When True, calendar instructions are injected into
+            the system prompt and calendar_event is listed as an available tool.
+    """
     if plan is None:
+        base_content = f"{SYSTEM_BASE}\n\n{INTAKE_CONTEXT}"
+        if calendar_enabled:
+            base_content += CALENDAR_INSTRUCTIONS
         return [
-            {"role": "system", "content": f"{SYSTEM_BASE}\n\n{INTAKE_CONTEXT}"},
+            {"role": "system", "content": base_content},
             {"role": "user", "content": user_message},
         ]
 
@@ -48,15 +69,20 @@ def build_system_context(
         "\n".join(f"- {f}" for f in plan.key_facts) if plan.key_facts else "None yet"
     )
 
+    available_tools = "search_kb, send_message, assign_channel, manage_progress"
+    if calendar_enabled:
+        available_tools += ", calendar_event"
+
     system_content = (
         f"{SYSTEM_BASE}\n\n"
         f"## Current Plan (v{plan.version})\n{plan_summary}\n\n"
         f"## Key Facts\n{facts}\n\n"
         f"## Instructions\n"
         f"Look at the current step (in_progress) and decide what to do.\n"
-        f"You can use tools: search_kb, send_message, assign_channel, "
-        f"calendar_event, manage_progress."
+        f"You can use tools: {available_tools}."
     )
+    if calendar_enabled:
+        system_content += CALENDAR_INSTRUCTIONS
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
 
