@@ -3,7 +3,7 @@
 Runs checks cheapest-to-most-expensive:
 1. BotFilter (CPU)
 2. EmptyFilter (CPU)
-3. RateLimiter (1 DynamoDB write)
+3. ConcurrencyGuard (1 DynamoDB write)
 4. InputSanitizer (CPU + conditional DynamoDB write)
 5. TokenBudgetGuard (2 DynamoDB reads)
 """
@@ -14,8 +14,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from middleware.inbound.budget_guard import TokenBudgetGuard
+from middleware.inbound.concurrency_guard import ConcurrencyGuard
 from middleware.inbound.filters import BotFilter, EmptyFilter
-from middleware.inbound.rate_limiter import RateLimiter
 from middleware.inbound.sanitizer import InputSanitizer
 from slack.models import MiddlewareResult, SlackEvent
 
@@ -37,7 +37,7 @@ class InboundMiddlewareChain:
         strike_limit: int = 3,
         max_message_length: int = 4000,
     ) -> None:
-        self._rate_limiter = RateLimiter(state_store=state_store)
+        self._concurrency_guard = ConcurrencyGuard(state_store=state_store)
         self._sanitizer = InputSanitizer(
             state_store=state_store,
             strike_limit=strike_limit,
@@ -60,8 +60,8 @@ class InboundMiddlewareChain:
         if not result.allowed:
             return result
 
-        # 3. RateLimiter (1 DynamoDB conditional write)
-        result = self._rate_limiter.check(event)
+        # 3. ConcurrencyGuard (1 DynamoDB conditional write)
+        result = self._concurrency_guard.check(event)
         if not result.allowed:
             return result
 

@@ -138,7 +138,7 @@ SlackEvent arrives
     │   ├── IF text is empty or whitespace → DROP (silent)
     │   └── ELSE → ALLOW
     │
-    ├── 3. RateLimiter (1 DynamoDB conditional write)
+    ├── 3. ConcurrencyGuard (1 DynamoDB conditional write)
     │   ├── Attempt acquire_lock(workspace_id, user_id) — DynamoDB conditional put with 60s TTL
     │   ├── IF lock NOT acquired → REJECT "Still working on your previous message..."
     │   └── IF lock acquired → ALLOW
@@ -1011,7 +1011,7 @@ User                  Slack API          Handler Lambda         SQS FIFO        
   │                      │                    │                    │                     │                      │
   │                      │                    ├─ BotFilter ────── OK                     │                      │
   │                      │                    ├─ EmptyFilter ──── OK                     │                      │
-  │                      │                    ├─ RateLimiter ──── OK (lock acquired)     │                      │
+  │                      │                    ├─ ConcurrencyGuard ──── OK (lock acquired)     │                      │
   │                      │                    ├─ InputSanitizer ─ OK                     │                      │
   │                      │                    ├─ BudgetGuard ──── OK                     │                      │
   │                      │                    │                    │                     │                      │

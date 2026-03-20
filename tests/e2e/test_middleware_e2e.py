@@ -153,7 +153,7 @@ class TestEmptyMessageFilterE2E:
 
 
 @pytest.mark.e2e
-class TestRateLimiterE2E:
+class TestConcurrencyGuardE2E:
     """Lock acquire/release behavior against real DynamoDB."""
 
     @pytest.fixture(autouse=True)

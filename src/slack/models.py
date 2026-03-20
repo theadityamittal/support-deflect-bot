@@ -29,6 +29,7 @@ class SlackEvent:
     timestamp: str
     is_bot: bool = False
     thread_ts: str | None = None
+    subtype: str | None = None
 
     @classmethod
     def from_event_body(cls, body: dict[str, Any]) -> SlackEvent:
@@ -66,6 +67,7 @@ class SlackEvent:
             is_bot=event.get("bot_id") is not None
             or event.get("subtype") == "bot_message",
             thread_ts=event.get("thread_ts"),
+            subtype=event.get("subtype"),
         )
 
 

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from state.dynamo import DynamoStateStore
 
 
-class RateLimiter:
+class ConcurrencyGuard:
     """Check and acquire per-user processing lock."""
 
     def __init__(self, *, state_store: DynamoStateStore) -> None:
