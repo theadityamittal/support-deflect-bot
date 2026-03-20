@@ -459,3 +459,6 @@ Outputs:
   TableName:
     Description: DynamoDB table name
     Value: !Ref StateTable
+  BucketName:
+    Description: S3 document bucket name
+    Value: !Ref DocumentBucket
