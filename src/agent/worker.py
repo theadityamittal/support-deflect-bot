@@ -296,7 +296,6 @@ def _create_orchestrator(
     logger.debug("_create_orchestrator: importing dependencies")
     from agent.orchestrator import Orchestrator
     from agent.tools.assign_channel import AssignChannelTool
-    from agent.tools.calendar_event import CalendarEventTool
     from agent.tools.manage_progress import ManageProgressTool
     from agent.tools.search_kb import SearchKBTool
     from agent.tools.send_message import SendMessageTool
@@ -351,7 +350,6 @@ def _create_orchestrator(
             slack_client=slack_client, channel_id=channel_id
         ),
         "assign_channel": AssignChannelTool(slack_client=slack_client, user_id=user_id),
-        "calendar_event": CalendarEventTool(),
         "manage_progress": ManageProgressTool(
             state_store=state_store,
             workspace_id=workspace_id,
@@ -359,6 +357,32 @@ def _create_orchestrator(
             router=router,
         ),
     }
+
+    # Conditionally register calendar tool based on workspace config
+    workspace_config = state_store.get_workspace_config(workspace_id=workspace_id)
+    if workspace_config and workspace_config.calendar_enabled:
+        from agent.tools.calendar_event import CalendarEventTool
+        from gcal.client import GoogleCalendarClient
+        from security.crypto import FieldEncryptor
+
+        google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+        google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+        kms_key_id = os.environ.get("KMS_KEY_ID", "")
+
+        gcal_client = GoogleCalendarClient(
+            client_id=google_client_id, client_secret=google_client_secret
+        )
+        encryptor = FieldEncryptor(kms_key_id=kms_key_id)
+        tools["calendar_event"] = CalendarEventTool(
+            gcal_client=gcal_client,
+            encryptor=encryptor,
+            state_store=state_store,
+            workspace_id=workspace_id,
+        )
+        logger.debug("CalendarEventTool registered (calendar_enabled=True)")
+    else:
+        logger.debug("CalendarEventTool skipped (calendar_enabled=False)")
+
     logger.debug(
         "_create_orchestrator: %d tools registered: %s", len(tools), list(tools.keys())
     )

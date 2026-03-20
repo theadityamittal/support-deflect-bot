@@ -435,3 +435,79 @@ class TestWorkerKillSwitch:
         assert result["statusCode"] == 200
         mock_orch.assert_not_called()
         mock_release.assert_called_once()
+
+
+class TestCalendarEventToolRegistration:
+    @patch("agent.worker._get_app_secrets")
+    @patch("agent.worker.boto3")
+    def test_calendar_tool_registered_when_enabled(self, mock_boto3, mock_secrets):
+        """CalendarEventTool is in tools dict when workspace has calendar_enabled=True."""
+        mock_secrets.return_value = {"gemini_api_key": "k", "pinecone_api_key": "p"}
+        mock_table = MagicMock()
+        mock_boto3.resource.return_value.Table.return_value = mock_table
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "KMS_KEY_ID": "key1",
+                    "DYNAMODB_TABLE_NAME": "t",
+                    "GOOGLE_CLIENT_ID": "gid",
+                    "GOOGLE_CLIENT_SECRET": "gsec",
+                },
+            ),
+            patch("state.dynamo.DynamoStateStore") as mock_store_cls,
+            patch("rag.vectorstore.PineconeVectorStore"),
+            patch("llm.gemini.GeminiProvider"),
+            patch("llm.router.LLMRouter"),
+            patch("middleware.agent.turn_budget.TurnBudgetEnforcer"),
+            patch("agent.orchestrator.Orchestrator") as mock_orch_cls,
+        ):
+            mock_config = MagicMock()
+            mock_config.calendar_enabled = True
+            mock_store_cls.return_value.get_workspace_config.return_value = mock_config
+
+            from agent.worker import _create_orchestrator
+
+            _create_orchestrator(
+                workspace_id="W1",
+                user_id="U1",
+                channel_id="C1",
+                slack_client=MagicMock(),
+            )
+            tools = mock_orch_cls.call_args.kwargs["tools"]
+            assert "calendar_event" in tools
+
+    @patch("agent.worker._get_app_secrets")
+    @patch("agent.worker.boto3")
+    def test_calendar_tool_not_registered_when_disabled(self, mock_boto3, mock_secrets):
+        """CalendarEventTool is NOT in tools dict when calendar_enabled=False."""
+        mock_secrets.return_value = {"gemini_api_key": "k", "pinecone_api_key": "p"}
+        mock_table = MagicMock()
+        mock_boto3.resource.return_value.Table.return_value = mock_table
+
+        with (
+            patch.dict(
+                "os.environ", {"KMS_KEY_ID": "key1", "DYNAMODB_TABLE_NAME": "t"}
+            ),
+            patch("state.dynamo.DynamoStateStore") as mock_store_cls,
+            patch("rag.vectorstore.PineconeVectorStore"),
+            patch("llm.gemini.GeminiProvider"),
+            patch("llm.router.LLMRouter"),
+            patch("middleware.agent.turn_budget.TurnBudgetEnforcer"),
+            patch("agent.orchestrator.Orchestrator") as mock_orch_cls,
+        ):
+            mock_config = MagicMock()
+            mock_config.calendar_enabled = False
+            mock_store_cls.return_value.get_workspace_config.return_value = mock_config
+
+            from agent.worker import _create_orchestrator
+
+            _create_orchestrator(
+                workspace_id="W1",
+                user_id="U1",
+                channel_id="C1",
+                slack_client=MagicMock(),
+            )
+            tools = mock_orch_cls.call_args.kwargs["tools"]
+            assert "calendar_event" not in tools
