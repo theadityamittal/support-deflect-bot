@@ -68,7 +68,8 @@ class SlackClient:
     def get_user_email(self, *, user_id: str) -> str | None:
         """Return email from user profile, or None if unavailable."""
         response = self._client.users_info(user=user_id)
-        profile: dict[str, Any] = response.get("user", {}).get("profile", {})
+        user_data = response.get("user") or {}
+        profile: dict[str, Any] = user_data.get("profile", {})
         email = profile.get("email")
         return str(email) if email else None
 
