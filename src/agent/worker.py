@@ -40,7 +40,7 @@ def _get_app_secrets() -> dict[str, str]:
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Process an SQS message: parse → orchestrate → respond via Slack."""
+    """Process an SQS message: parse → SETUP check → orchestrate → respond via Slack."""
     logger.debug(
         "lambda_handler invoked with %d records", len(event.get("Records", []))
     )
@@ -53,12 +53,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             user_id = message["user_id"]
             channel_id = message["channel_id"]
             text = message["text"]
+            event_type = message.get("event_type", "message")
+            metadata = message.get("metadata") or {}
+            action_id = metadata.get("action_id")
 
             logger.info(
-                "Processing message workspace=%s user=%s channel=%s text=%s",
+                "Processing message workspace=%s user=%s channel=%s event_type=%s text=%s",
                 workspace_id,
                 user_id,
                 channel_id,
+                event_type,
                 text[:80],
             )
 
@@ -68,6 +72,39 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
             slack_client = SlackClient(web_client=WebClient(token=bot_token))
             logger.debug("SlackClient created")
+
+            # Check for active SETUP record — route to setup state machine if present
+            setup_state = _get_setup_state(workspace_id=workspace_id)
+            if setup_state is not None:
+                logger.info(
+                    "SETUP record found for workspace=%s, admin=%s",
+                    workspace_id,
+                    setup_state.admin_user_id,
+                )
+                try:
+                    if user_id == setup_state.admin_user_id:
+                        logger.debug(
+                            "Routing admin user=%s to setup state machine", user_id
+                        )
+                        _call_process_setup_message(
+                            text=text,
+                            action_id=action_id,
+                            setup_state=setup_state,
+                            slack_client=slack_client,
+                            workspace_id=workspace_id,
+                        )
+                    else:
+                        logger.debug(
+                            "Non-admin user=%s during setup, sending ephemeral", user_id
+                        )
+                        slack_client.send_ephemeral(
+                            channel=channel_id,
+                            user=user_id,
+                            text="Setup is in progress. Please wait for the admin to complete workspace configuration.",
+                        )
+                finally:
+                    _release_user_lock(workspace_id=workspace_id, user_id=user_id)
+                continue
 
             logger.debug("Creating orchestrator")
             orchestrator = _create_orchestrator(
@@ -155,6 +192,65 @@ def _get_bot_token(workspace_id: str) -> str:
 
     msg = f"No bot token found for workspace {workspace_id}"
     raise ValueError(msg)
+
+
+def _get_setup_state(*, workspace_id: str) -> Any:
+    """Return the active SETUP record for the workspace, or None if absent."""
+    from state.dynamo import DynamoStateStore
+
+    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
+    table = boto3.resource("dynamodb").Table(table_name)
+    store = DynamoStateStore(table=table)
+    result = store.get_setup_state(workspace_id=workspace_id)
+    logger.debug(
+        "_get_setup_state: workspace=%s found=%s", workspace_id, result is not None
+    )
+    return result
+
+
+def _call_process_setup_message(
+    *,
+    text: str,
+    action_id: str | None,
+    setup_state: Any,
+    slack_client: Any,
+    workspace_id: str,
+) -> None:
+    """Build minimal SetupDependencies and delegate to process_setup_message."""
+    from admin.setup import SetupDependencies, process_setup_message
+    from state.dynamo import DynamoStateStore
+
+    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
+    table = boto3.resource("dynamodb").Table(table_name)
+    state_store = DynamoStateStore(table=table)
+
+    sqs_queue_url = os.environ.get("SQS_QUEUE_URL", "")
+    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    google_oauth_redirect_uri = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI", "")
+
+    deps = SetupDependencies(
+        state_store=state_store,
+        slack_client=slack_client,
+        encryptor=None,
+        sqs_queue_url=sqs_queue_url,
+        google_client_id=google_client_id,
+        google_oauth_redirect_uri=google_oauth_redirect_uri,
+        lambda_context=None,
+        sqs_client=boto3.client("sqs") if sqs_queue_url else None,
+    )
+
+    logger.debug(
+        "_call_process_setup_message: workspace=%s step=%s action_id=%s",
+        workspace_id,
+        setup_state.step,
+        action_id,
+    )
+    process_setup_message(
+        text=text,
+        action_id=action_id,
+        setup_state=setup_state,
+        deps=deps,
+    )
 
 
 def _create_orchestrator(
