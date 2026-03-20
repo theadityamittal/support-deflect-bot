@@ -34,6 +34,11 @@ PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "onboard-assist")
 SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 
 E2E_WORKSPACE_ID = "E2E_TEST_WORKSPACE"
+E2E_TEST_WORKSPACE_NOCONFIG = "E2E_TEST_WORKSPACE_NOCONFIG"
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+GOOGLE_REFRESH_TOKEN_ENV = os.getenv("GOOGLE_REFRESH_TOKEN", "")
 
 
 @pytest.fixture()
@@ -95,6 +100,35 @@ def sqs_queue_url() -> str:
 @pytest.fixture()
 def dynamodb_table():
     return boto3.resource("dynamodb").Table(DYNAMODB_TABLE)
+
+
+@pytest.fixture()
+def state_store():
+    from state.dynamo import DynamoStateStore
+
+    return DynamoStateStore(table_name=DYNAMODB_TABLE)
+
+
+@pytest.fixture()
+def kms_key_id() -> str:
+    key_id = os.getenv("KMS_KEY_ID", "")
+    if not key_id:
+        pytest.skip("KMS_KEY_ID not set")
+    return key_id
+
+
+@pytest.fixture()
+def google_credentials() -> dict[str, str]:
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        pytest.skip("Google OAuth credentials not set")
+    return {"client_id": GOOGLE_CLIENT_ID, "client_secret": GOOGLE_CLIENT_SECRET}
+
+
+@pytest.fixture()
+def google_refresh_token() -> str:
+    if not GOOGLE_REFRESH_TOKEN_ENV:
+        pytest.skip("GOOGLE_REFRESH_TOKEN not set")
+    return GOOGLE_REFRESH_TOKEN_ENV
 
 
 def sign_request(body_str: str, secret: str) -> dict[str, str]:
