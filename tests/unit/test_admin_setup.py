@@ -459,3 +459,54 @@ class TestAcquireLockTTL:
         assert "#ttl < :now" in condition
         assert put_call.kwargs["ExpressionAttributeNames"] == {"#ttl": "ttl"}
         assert ":now" in put_call.kwargs["ExpressionAttributeValues"]
+
+
+class TestChannelMappingBlocks:
+    def test_channel_mapping_has_confirm_button(self):
+        """Channel mapping blocks should include a Confirm Mapping button."""
+        from slack.blocks import channel_mapping
+
+        default_ch = {"id": "C_GEN", "name": "general"}
+        channels = [default_ch, {"id": "C_ENG", "name": "engineering"}]
+        blocks = channel_mapping(
+            teams=["Engineering"], channels=channels, default_channel=default_ch
+        )
+
+        # Find the actions block with confirm button
+        action_blocks = [b for b in blocks if b.get("type") == "actions"]
+        assert len(action_blocks) == 1
+        confirm_btn = action_blocks[0]["elements"][0]
+        assert confirm_btn["action_id"] == "channel_mapping_confirm"
+
+    def test_channel_mapping_has_initial_option(self):
+        """Each dropdown should have initial_option set to default_channel."""
+        from slack.blocks import channel_mapping
+
+        default_ch = {"id": "C_GEN", "name": "general"}
+        channels = [default_ch, {"id": "C_ENG", "name": "engineering"}]
+        blocks = channel_mapping(
+            teams=["Engineering"], channels=channels, default_channel=default_ch
+        )
+
+        # Find the section block with accessory (dropdown)
+        section_blocks = [b for b in blocks if b.get("accessory")]
+        assert len(section_blocks) == 1
+        select = section_blocks[0]["accessory"]
+        assert select["initial_option"]["value"] == "C_GEN"
+        assert select["initial_option"]["text"]["text"] == "general"
+
+    def test_channel_mapping_has_help_note(self):
+        """Channel mapping should include a note about creating channels."""
+        from slack.blocks import channel_mapping
+
+        default_ch = {"id": "C_GEN", "name": "general"}
+        blocks = channel_mapping(
+            teams=["Eng"], channels=[default_ch], default_channel=default_ch
+        )
+
+        texts = [
+            b.get("text", {}).get("text", "")
+            for b in blocks
+            if b.get("type") == "section"
+        ]
+        assert any("/sherpa-setup" in t for t in texts)

@@ -84,12 +84,18 @@ def calendar_setup_prompt() -> list[dict]:
     ]
 
 
-def channel_mapping(teams: list[str], channels: list[dict]) -> list[dict]:
+def channel_mapping(
+    teams: list[str],
+    channels: list[dict],
+    *,
+    default_channel: dict | None = None,
+) -> list[dict]:
     """Build blocks with a channel select dropdown for each team.
 
     Args:
         teams: Team names to map.
         channels: Available channels as dicts with 'id' and 'name' keys.
+        default_channel: Channel dict to pre-select on every dropdown.
 
     Returns:
         Block Kit blocks list.
@@ -106,6 +112,13 @@ def channel_mapping(teams: list[str], channels: list[dict]) -> list[dict]:
         _section("*Channel Mapping*\n" "Select a Slack channel for each team.")
     ]
 
+    initial_option = None
+    if default_channel:
+        initial_option = {
+            "text": {"type": "plain_text", "text": default_channel["name"]},
+            "value": default_channel["id"],
+        }
+
     for team in teams:
         action_id = f"channel_map_{_slug(team)}"
         select: dict = {
@@ -114,12 +127,24 @@ def channel_mapping(teams: list[str], channels: list[dict]) -> list[dict]:
             "action_id": action_id,
             "options": options,
         }
+        if initial_option:
+            select["initial_option"] = initial_option
         block: dict = {
             "type": "section",
             "text": {"type": "mrkdwn", "text": f"*{team}*"},
             "accessory": select,
         }
         blocks.append(block)
+
+    blocks.append(
+        _section(
+            "Don't see your channel? Create it in Slack first, "
+            "then run `/sherpa-setup` to resume."
+        )
+    )
+    blocks.append(
+        _actions(_button("Confirm Mapping", "channel_mapping_confirm", style="primary"))
+    )
 
     return blocks
 
