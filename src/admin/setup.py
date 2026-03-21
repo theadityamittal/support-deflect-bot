@@ -176,7 +176,8 @@ def _handle_awaiting_url(
     *, text: str, action_id: str | None, state: SetupState, deps: SetupDependencies
 ) -> SetupState:
     """Validate URL, kick off scraping, transition to scraping step."""
-    url = text.strip()
+    # Slack auto-links URLs: <https://example.com> or <https://example.com|example.com>
+    url = text.strip().strip("<>").split("|")[0]
     if not _is_valid_url(url):
         return _llm_fallback(
             text=text,

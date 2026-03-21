@@ -74,7 +74,9 @@ class TestSlackOAuthCreatesSetupRecord:
             "team": {"id": "W_NEW", "name": "New Corp"},
         }
         mock_web_client = MagicMock()
-        mock_web_client.oauth_v2_access.return_value = token_response
+        mock_response = MagicMock()
+        mock_response.data = token_response
+        mock_web_client.oauth_v2_access.return_value = mock_response
 
         mock_table = MagicMock()
         # DynamoDB Table.put_item is used by save_workspace_config/save_workspace_secrets/save_setup_state

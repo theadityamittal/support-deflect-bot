@@ -64,7 +64,7 @@ def _exchange_code_for_token(code: str) -> dict[str, Any]:
         ),
         code=code,
     )
-    result: dict[str, Any] = dict(response)
+    result: dict[str, Any] = dict(response.data)
     return result
 
 
