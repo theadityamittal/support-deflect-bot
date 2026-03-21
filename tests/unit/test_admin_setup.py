@@ -664,3 +664,13 @@ class TestSlackLinkStripping:
             )
 
         assert result.website_url == "https://example.com"
+
+
+class TestCalendarOAuthInitiatedField:
+    def test_setup_state_defaults_to_false(self):
+        state = _make_state(step="calendar")
+        assert state.calendar_oauth_initiated is False
+
+    def test_setup_state_accepts_true(self):
+        state = _make_state(step="calendar", calendar_oauth_initiated=True)
+        assert state.calendar_oauth_initiated is True

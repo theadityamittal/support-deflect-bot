@@ -350,6 +350,7 @@ class DynamoStateStore:
                 "teams": list(setup_state.teams),
                 "channel_mapping": dict(setup_state.channel_mapping),
                 "calendar_enabled": setup_state.calendar_enabled,
+                "calendar_oauth_initiated": setup_state.calendar_oauth_initiated,
                 "created_at": setup_state.created_at,
                 "updated_at": setup_state.updated_at,
                 "ttl": ttl_for_setup(),
@@ -373,6 +374,7 @@ class DynamoStateStore:
             teams=tuple(item.get("teams", [])),
             channel_mapping=dict(item.get("channel_mapping", {})),
             calendar_enabled=item.get("calendar_enabled", False),
+            calendar_oauth_initiated=item.get("calendar_oauth_initiated", False),
             created_at=item.get("created_at", ""),
             updated_at=item.get("updated_at", ""),
         )
