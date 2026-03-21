@@ -19,10 +19,15 @@ class TestTTLPolicy:
         days_90 = 90 * 24 * 60 * 60
         assert abs(ttl - (now + days_90)) < 5  # within 5s tolerance
 
-    def test_lock_ttl_is_60_seconds(self):
+    def test_lock_ttl_is_15_seconds(self):
         ttl = ttl_for_lock()
         now = int(time.time())
-        assert abs(ttl - (now + 60)) < 5
+        assert abs(ttl - (now + 15)) < 5
+
+    def test_lock_ttl_custom_seconds(self):
+        ttl = ttl_for_lock(seconds=90)
+        now = int(time.time())
+        assert abs(ttl - (now + 90)) < 5
 
     def test_daily_usage_ttl_is_7_days(self):
         ttl = ttl_for_daily_usage()
