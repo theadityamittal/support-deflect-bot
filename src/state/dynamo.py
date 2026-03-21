@@ -168,6 +168,27 @@ class DynamoStateStore:
             calendar_enabled=item.get("calendar_enabled", False),
         )
 
+    def update_workspace_config(
+        self, *, workspace_id: str, updates: dict[str, Any]
+    ) -> None:
+        """Partial update on the CONFIG record."""
+        if not updates:
+            return
+        expr_parts = []
+        attr_names: dict[str, str] = {}
+        attr_values: dict[str, Any] = {}
+        for key, value in updates.items():
+            safe_key = f"#{key}"
+            attr_names[safe_key] = key
+            attr_values[f":{key}"] = value
+            expr_parts.append(f"{safe_key} = :{key}")
+        self._table.update_item(
+            Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "CONFIG"},
+            UpdateExpression="SET " + ", ".join(expr_parts),
+            ExpressionAttributeNames=attr_names,
+            ExpressionAttributeValues=attr_values,
+        )
+
     def get_daily_usage_turns(self, *, workspace_id: str, user_id: str) -> int:
         """Get turn count for today's usage record."""
         today = date.today().isoformat()

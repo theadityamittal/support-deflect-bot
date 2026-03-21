@@ -232,3 +232,22 @@ class TestOnboardCalendar:
         assert "blocks" in parsed
         blocks_text = json.dumps(parsed["blocks"])
         assert "enable" in blocks_text.lower() or "calendar_enable" in blocks_text
+
+
+class TestUpdateWorkspaceConfig:
+    def test_update_workspace_config_partial_update(self):
+        from state.dynamo import DynamoStateStore
+
+        mock_table = MagicMock()
+        store = DynamoStateStore(table=mock_table)
+
+        store.update_workspace_config(
+            workspace_id="W1",
+            updates={"admin_user_id": "U_NEW"},
+        )
+
+        mock_table.update_item.assert_called_once()
+        call_kwargs = mock_table.update_item.call_args[1]
+        assert call_kwargs["Key"] == {"pk": "WORKSPACE#W1", "sk": "CONFIG"}
+        assert ":admin_user_id" in call_kwargs["ExpressionAttributeValues"]
+        assert call_kwargs["ExpressionAttributeValues"][":admin_user_id"] == "U_NEW"
