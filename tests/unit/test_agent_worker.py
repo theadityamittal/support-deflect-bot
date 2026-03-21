@@ -477,6 +477,7 @@ class TestCalendarEventToolRegistration:
             patch("llm.gemini.GeminiProvider"),
             patch("llm.router.LLMRouter"),
             patch("middleware.agent.turn_budget.TurnBudgetEnforcer"),
+            patch("security.crypto.FieldEncryptor"),
             patch("agent.orchestrator.Orchestrator") as mock_orch_cls,
         ):
             from agent.worker import _create_orchestrator

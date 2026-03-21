@@ -285,7 +285,7 @@ class TestNewSlashCommandsE2E:
         yield
         cleanup_dynamodb_test_records(dynamodb_table)
 
-    def test_slash_command_onboard_setup(self, api_base_url, signing_secret):
+    def test_slash_command_sherpa_setup(self, api_base_url, signing_secret):
         """/sherpa-setup should return setup instructions."""
         body = {
             "command": "/sherpa-setup",
@@ -315,7 +315,7 @@ class TestNewSlashCommandsE2E:
         )
         print(f"  /sherpa-setup response: {data['text'][:100]}...")
 
-    def test_slash_command_onboard_calendar(self, api_base_url, signing_secret):
+    def test_slash_command_sherpa_calendar(self, api_base_url, signing_secret):
         """/sherpa-calendar should return calendar info."""
         body = {
             "command": "/sherpa-calendar",

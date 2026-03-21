@@ -19,6 +19,13 @@ def _disable_kill_switch():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _mock_state_store():
+    """Prevent unit tests from creating real boto3 DynamoDB resources."""
+    with patch("slack.handler._get_state_store", return_value=MagicMock()):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
