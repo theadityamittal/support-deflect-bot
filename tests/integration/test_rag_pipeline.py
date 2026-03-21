@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+
 from rag.chunker import chunk_text
 from rag.confidence import calculate_confidence
 from rag.pipeline import RAGPipeline

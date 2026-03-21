@@ -8,8 +8,9 @@ import os
 from typing import Any
 
 import boto3
-from slack.client import SlackClient
 from slack_sdk import WebClient
+
+from slack.client import SlackClient
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -65,6 +66,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             event_type = message.get("event_type", "message")
             metadata = message.get("metadata") or {}
             action_id = metadata.get("action_id")
+            action_value = metadata.get("action_value") or ""
             thread_ts = metadata.get("thread_ts") or message.get("thread_ts")
 
             logger.info(
@@ -138,8 +140,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                         logger.debug(
                             "Routing admin user=%s to setup state machine", user_id
                         )
+                        # For interactions, pass action_value as text (dropdowns put selection there)
+                        setup_text = (
+                            action_value
+                            if event_type == "interaction" and action_value
+                            else text
+                        )
                         _call_process_setup_message(
-                            text=text,
+                            text=setup_text,
                             action_id=action_id,
                             setup_state=setup_state,
                             slack_client=slack_client,
@@ -154,6 +162,24 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                             user=user_id,
                             text="Setup is in progress. Please wait for the admin to complete workspace configuration.",
                         )
+                finally:
+                    _release_user_lock(workspace_id=workspace_id, user_id=user_id)
+                continue
+
+            # Handle post-setup calendar interactions (no SETUP record)
+            if event_type == "interaction" and action_id in (
+                "calendar_enable",
+                "calendar_skip_setup",
+                "calendar_relink",
+            ):
+                try:
+                    _handle_calendar_interaction(
+                        action_id=action_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        slack_client=slack_client,
+                        state_store=state_store,
+                    )
                 finally:
                     _release_user_lock(workspace_id=workspace_id, user_id=user_id)
                 continue
@@ -251,10 +277,11 @@ def _call_process_setup_message(
     from admin.setup import SetupDependencies, process_setup_message
 
     state_store = _get_state_store()
+    secrets = _get_app_secrets()
 
     sqs_queue_url = os.environ.get("SQS_QUEUE_URL", "")
-    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
-    google_oauth_redirect_uri = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI", "")
+    google_client_id = secrets.get("google_client_id", "")
+    google_oauth_redirect_uri = secrets.get("google_oauth_redirect_uri", "")
 
     deps = SetupDependencies(
         state_store=state_store,
@@ -398,3 +425,54 @@ def _create_orchestrator(
         channel_id=channel_id,
         budget=budget,
     )
+
+
+def _handle_calendar_interaction(
+    *,
+    action_id: str,
+    workspace_id: str,
+    user_id: str,
+    slack_client: SlackClient,
+    state_store: Any,
+) -> None:
+    """Handle calendar_enable/skip/relink interactions outside the setup flow."""
+    from gcal.oauth import build_authorization_url
+
+    logger.info(
+        "Handling post-setup calendar interaction: action_id=%s workspace=%s",
+        action_id,
+        workspace_id,
+    )
+
+    if action_id == "calendar_enable" or action_id == "calendar_relink":
+        secrets = _get_app_secrets()
+        google_client_id = secrets.get("google_client_id", "")
+        redirect_uri = secrets.get("google_oauth_redirect_uri", "")
+
+        if not google_client_id or not redirect_uri:
+            logger.error(
+                "Missing Google OAuth config: client_id=%s redirect_uri=%s",
+                bool(google_client_id),
+                bool(redirect_uri),
+            )
+            slack_client.send_message(
+                channel=user_id,
+                text="Google Calendar integration is not configured. Please contact support.",
+            )
+            return
+
+        oauth_url = build_authorization_url(
+            client_id=google_client_id,
+            redirect_uri=redirect_uri,
+            workspace_id=workspace_id,
+        )
+        slack_client.send_message(
+            channel=user_id,
+            text=f"Please authorize Google Calendar access:\n{oauth_url}",
+        )
+
+    elif action_id == "calendar_skip_setup":
+        slack_client.send_message(
+            channel=user_id,
+            text="Calendar integration skipped. You can enable it later with `/sherpa-calendar`.",
+        )

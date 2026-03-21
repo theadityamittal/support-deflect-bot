@@ -1,6 +1,7 @@
 """Tests for 4-factor confidence scoring."""
 
 import pytest
+
 from rag.confidence import calculate_confidence
 
 

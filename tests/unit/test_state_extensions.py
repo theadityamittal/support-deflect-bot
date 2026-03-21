@@ -6,6 +6,7 @@ from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
+
 from state.dynamo import DynamoStateStore
 from state.models import WorkspaceConfig
 

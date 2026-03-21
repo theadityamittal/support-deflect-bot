@@ -64,7 +64,7 @@ class GoogleCalendarClient:
             json=body,
         )
         response.raise_for_status()
-        return cast(dict[str, Any], response.json())
+        return cast("dict[str, Any]", response.json())
 
     def refresh_access_token(self, *, refresh_token: str) -> dict[str, Any]:
         """Exchange a refresh token for a new access token.
@@ -121,4 +121,4 @@ class GoogleCalendarClient:
             },
         )
         response.raise_for_status()
-        return cast(dict[str, Any], response.json())
+        return cast("dict[str, Any]", response.json())

@@ -11,6 +11,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from admin.setup import SetupDependencies, process_setup_message
 from state.models import (
     OnboardingPlan,
@@ -74,7 +75,9 @@ class TestSlackOAuthCreatesSetupRecord:
             "team": {"id": "W_NEW", "name": "New Corp"},
         }
         mock_web_client = MagicMock()
-        mock_web_client.oauth_v2_access.return_value = token_response
+        mock_response = MagicMock()
+        mock_response.data = token_response
+        mock_web_client.oauth_v2_access.return_value = mock_response
 
         mock_table = MagicMock()
         # DynamoDB Table.put_item is used by save_workspace_config/save_workspace_secrets/save_setup_state
@@ -324,29 +327,34 @@ class TestAdminSetupTeamsStep:
 
 @pytest.mark.integration
 class TestAdminSetupChannelsStep:
-    def test_channel_map_action_saves_mapping_and_advances_when_complete(self):
-        """A channel_map action for the last team should trigger transition to calendar."""
+    def test_channel_map_action_saves_mapping_then_confirm_advances(self):
+        """A channel_map action updates mapping; confirm transitions to calendar."""
         state = _make_setup_state(
             step="channels",
             website_url="https://example.com",
             teams=("Engineering",),
-            channel_mapping={},
+            channel_mapping={"engineering": "C_GEN"},  # pre-populated
         )
         mock_store = MagicMock()
         mock_store.get_pending_users.return_value = []
         mock_slack = MagicMock()
         deps = _make_deps(state_store=mock_store, slack_client=mock_slack)
 
-        new_state = process_setup_message(
+        # Dropdown updates mapping but stays in channels
+        state = process_setup_message(
             text="C_ENG",
             action_id="channel_map_engineering",
             setup_state=state,
             deps=deps,
         )
+        assert state.step == "channels"
+        assert state.channel_mapping["engineering"] == "C_ENG"
 
-        # All teams are now mapped — should advance to calendar
-        assert new_state.step == "calendar"
-        assert new_state.channel_mapping.get("engineering") == "C_ENG"
+        # Confirm transitions to calendar
+        state = process_setup_message(
+            text="", action_id="channel_mapping_confirm", setup_state=state, deps=deps
+        )
+        assert state.step == "calendar"
 
     def test_partial_channel_mapping_stays_in_channels(self):
         """Mapping one team when two are expected should stay in channels step."""
@@ -407,12 +415,21 @@ class TestAdminSetupCalendarStep:
         )
 
         assert new_state.step == "done"
-        assert new_state.calendar_enabled is True
+        # calendar_enabled stays False until OAuth callback confirms
+        assert new_state.calendar_enabled is False
+        assert new_state.calendar_oauth_initiated is True
         # Should have sent OAuth URL message + completion summary
         assert mock_slack.send_message.call_count >= 2
         # OAuth URL message should contain accounts.google.com
         oauth_msg = mock_slack.send_message.call_args_list[0].kwargs["text"]
         assert "accounts.google.com" in oauth_msg
+        # Summary should say "Pending authorization"
+        summary_msgs = [
+            c.kwargs["text"]
+            for c in mock_slack.send_message.call_args_list
+            if "Setup Complete" in c.kwargs.get("text", "")
+        ]
+        assert any("pending" in m.lower() for m in summary_msgs)
 
     def test_calendar_skip_advances_to_done_with_calendar_disabled(self):
         """Skipping calendar should complete setup with calendar_enabled=False."""
@@ -587,30 +604,35 @@ class TestAdminSetupFullFlow:
                 deps=deps,
             )
         assert state.step == "teams"
-        assert state.website_url == "https://fulltest.example.com"
 
-        # Step 3: teams confirm → channels
+        # Step 3: teams confirm → channels (pre-populated with first channel as default)
         state = process_setup_message(
             text="", action_id="teams_confirm", setup_state=state, deps=deps
         )
         assert state.step == "channels"
+        assert state.channel_mapping.get("engineering") == "C001"  # pre-populated
 
-        # Step 4: channel_map → calendar (all teams mapped)
+        # Step 4: channel_map updates mapping (stays in channels)
         state = process_setup_message(
             text="C001",
             action_id="channel_map_engineering",
             setup_state=state,
             deps=deps,
         )
+        assert state.step == "channels"
+
+        # Step 5: confirm mapping → calendar
+        state = process_setup_message(
+            text="", action_id="channel_mapping_confirm", setup_state=state, deps=deps
+        )
         assert state.step == "calendar"
 
-        # Step 5: calendar skip → done
+        # Step 6: calendar skip → done
         state = process_setup_message(
             text="", action_id="calendar_skip_setup", setup_state=state, deps=deps
         )
         assert state.step == "done"
 
-        # Verify complete_setup was called
         mock_store.complete_setup.assert_called_once()
         final_config = mock_store.complete_setup.call_args.kwargs["config_updates"]
         assert final_config["website_url"] == "https://fulltest.example.com"
@@ -630,7 +652,7 @@ class TestAdminSetupFullFlow:
         mock_store.get_pending_users.return_value = []
         mock_slack = MagicMock()
         mock_slack.list_usergroups.return_value = []
-        mock_slack.list_channels.return_value = []
+        mock_slack.list_channels.return_value = [{"id": "C_GEN", "name": "general"}]
 
         deps = _make_deps(state_store=mock_store, slack_client=mock_slack)
 
@@ -652,7 +674,7 @@ class TestAdminSetupFullFlow:
             )
         assert state.step == "teams"
 
-        # Manual teams → channels
+        # Manual teams → channels (pre-populated with general)
         state = process_setup_message(
             text="Events, Admin",
             action_id=None,
@@ -660,6 +682,8 @@ class TestAdminSetupFullFlow:
             deps=deps,
         )
         assert state.step == "channels"
+        assert state.channel_mapping.get("events") == "C_GEN"
+        assert state.channel_mapping.get("admin") == "C_GEN"
 
         # Map events channel
         state = process_setup_message(
@@ -668,12 +692,20 @@ class TestAdminSetupFullFlow:
             setup_state=state,
             deps=deps,
         )
-        # Map admin channel — now all teams mapped → calendar
+        assert state.step == "channels"  # stays in channels
+
+        # Map admin channel
         state = process_setup_message(
             text="C_ADMIN",
             action_id="channel_map_admin",
             setup_state=state,
             deps=deps,
+        )
+        assert state.step == "channels"  # stays in channels (no auto-transition)
+
+        # Confirm mapping → calendar
+        state = process_setup_message(
+            text="", action_id="channel_mapping_confirm", setup_state=state, deps=deps
         )
         assert state.step == "calendar"
 
@@ -682,8 +714,11 @@ class TestAdminSetupFullFlow:
             text="", action_id="calendar_enable", setup_state=state, deps=deps
         )
         assert state.step == "done"
-        assert state.calendar_enabled is True
+        # calendar_enabled stays False until OAuth callback confirms
+        assert state.calendar_enabled is False
+        assert state.calendar_oauth_initiated is True
 
         mock_store.complete_setup.assert_called_once()
         final_config = mock_store.complete_setup.call_args.kwargs["config_updates"]
-        assert final_config["calendar_enabled"] is True
+        # Config also False — OAuth callback will flip it
+        assert final_config["calendar_enabled"] is False

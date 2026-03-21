@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
+
 from agent.tools.base import AgentTool, ToolResult
 
 if TYPE_CHECKING:

@@ -8,6 +8,7 @@ import hmac
 import time
 
 import pytest
+
 from slack.signature import InvalidSignatureError, verify_slack_signature
 
 

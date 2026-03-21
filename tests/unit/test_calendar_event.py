@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+
 from agent.tools.calendar_event import CalendarEventTool
 
 

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+
 from gcal.client import GoogleCalendarClient
 
 _CLIENT_ID = "test-client-id"

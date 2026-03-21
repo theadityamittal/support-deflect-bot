@@ -15,10 +15,11 @@ import time
 from typing import Any, cast
 
 import boto3
+from slack_sdk import WebClient
+
 from gcal.client import GoogleCalendarClient
 from security.crypto import FieldEncryptor
 from slack.client import SlackClient
-from slack_sdk import WebClient
 from state.dynamo import DynamoStateStore
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,11 @@ def _exchange_code(code: str) -> dict[str, Any]:
             "google_client_secret", os.environ.get("GOOGLE_CLIENT_SECRET", "")
         ),
     )
-    redirect_uri = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI", "")
+    redirect_uri = secrets.get(
+        "google_oauth_redirect_uri", os.environ.get("GOOGLE_OAUTH_REDIRECT_URI", "")
+    )
     return cast(
-        dict[str, Any], client.exchange_code(code=code, redirect_uri=redirect_uri)
+        "dict[str, Any]", client.exchange_code(code=code, redirect_uri=redirect_uri)
     )
 
 

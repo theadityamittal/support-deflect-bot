@@ -7,6 +7,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from slack.handler import (
     _build_middleware_chain,
     _check_setup_gating,
@@ -176,17 +177,11 @@ class TestSlackHandlerLambda:
     @patch("slack.handler._get_signing_secret")
     @patch("slack.handler.verify_slack_signature")
     @patch("slack.handler._enqueue_to_sqs")
-    @patch("slack.handler._build_middleware_chain")
-    def test_interaction_path_returns_200(
-        self, mock_chain_builder, mock_enqueue, mock_verify, mock_secret
-    ):
+    def test_interaction_path_returns_200(self, mock_enqueue, mock_verify, mock_secret):
         import json as _json
         from urllib.parse import urlencode
 
         mock_secret.return_value = "secret"
-        mock_chain = MagicMock()
-        mock_chain.run.return_value = MagicMock(allowed=True)
-        mock_chain_builder.return_value = mock_chain
 
         payload = {
             "type": "block_actions",
@@ -206,7 +201,6 @@ class TestSlackHandlerLambda:
         }
         result = lambda_handler(event, {})
         assert result["statusCode"] == 200
-        mock_chain.run.assert_called_once()
         mock_enqueue.assert_called_once()
 
 
@@ -235,16 +229,10 @@ class TestBuildMiddlewareChain:
 class TestSendEphemeralRejection:
     @patch("slack.handler.SlackClient")
     @patch("slack.handler.WebClient")
-    @patch("slack.handler._get_state_store")
+    @patch("slack.handler._get_bot_token_for_workspace", return_value="xoxb-test")
     def test_sends_ephemeral_with_bot_token(
-        self, mock_get_store, mock_wc_cls, mock_sc_cls
+        self, mock_get_token, mock_wc_cls, mock_sc_cls
     ):
-        mock_store = MagicMock()
-        mock_config = MagicMock()
-        mock_config.bot_token = "xoxb-test"
-        mock_store.get_workspace_config.return_value = mock_config
-        mock_get_store.return_value = mock_store
-
         mock_slack_client = MagicMock()
         mock_sc_cls.return_value = mock_slack_client
 
@@ -254,6 +242,7 @@ class TestSendEphemeralRejection:
             user_id="U1",
             text="Rate limited",
         )
+        mock_get_token.assert_called_once_with("W1")
         mock_wc_cls.assert_called_once_with(token="xoxb-test")
         mock_sc_cls.assert_called_once_with(web_client=mock_wc_cls.return_value)
         mock_slack_client.send_ephemeral.assert_called_once_with(
@@ -262,12 +251,11 @@ class TestSendEphemeralRejection:
 
     @patch("slack.handler.SlackClient")
     @patch("slack.handler.WebClient")
-    @patch("slack.handler._get_state_store")
-    def test_skips_when_no_config(self, mock_get_store, mock_wc_cls, mock_sc_cls):
-        mock_store = MagicMock()
-        mock_store.get_workspace_config.return_value = None
-        mock_get_store.return_value = mock_store
-
+    @patch(
+        "slack.handler._get_bot_token_for_workspace",
+        side_effect=ValueError("No bot_token"),
+    )
+    def test_skips_when_no_token(self, mock_get_token, mock_wc_cls, mock_sc_cls):
         _send_ephemeral_rejection(
             workspace_id="W1",
             channel_id="C1",
@@ -278,16 +266,10 @@ class TestSendEphemeralRejection:
 
     @patch("slack.handler.SlackClient")
     @patch("slack.handler.WebClient")
-    @patch("slack.handler._get_state_store")
+    @patch("slack.handler._get_bot_token_for_workspace", return_value="xoxb-test")
     def test_handles_api_error_gracefully(
-        self, mock_get_store, mock_wc_cls, mock_sc_cls
+        self, mock_get_token, mock_wc_cls, mock_sc_cls
     ):
-        mock_store = MagicMock()
-        mock_config = MagicMock()
-        mock_config.bot_token = "xoxb-test"
-        mock_store.get_workspace_config.return_value = mock_config
-        mock_get_store.return_value = mock_store
-
         mock_slack_client = MagicMock()
         mock_slack_client.send_ephemeral.side_effect = Exception("Slack API error")
         mock_sc_cls.return_value = mock_slack_client

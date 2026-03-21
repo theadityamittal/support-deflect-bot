@@ -4,6 +4,7 @@ import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from security.crypto import FieldEncryptor
 
 

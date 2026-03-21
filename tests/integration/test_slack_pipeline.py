@@ -6,6 +6,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+
 from middleware.inbound.chain import HandlerMiddlewareChain, WorkerMiddlewareChain
 from slack.models import EventType, SlackEvent, SQSMessage
 

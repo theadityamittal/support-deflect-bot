@@ -9,6 +9,7 @@ CLAUDE.md
 .claude/
 .understand-anything
 docs/superpowers
+.superpowers
 
 # Python
 __pycache__/

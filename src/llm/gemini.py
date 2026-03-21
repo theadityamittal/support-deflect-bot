@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from llm.provider import LLMProvider, LLMResponse
 from openai import OpenAI
+
+from llm.provider import LLMProvider, LLMResponse
 
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 

@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from llm.fallback import FallbackChain, LLMUnavailableError
 from llm.provider import LLMResponse
 

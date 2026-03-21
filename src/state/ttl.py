@@ -5,7 +5,7 @@ Each record type has a specific TTL based on the spec:
 - Completion records: Never (no TTL)
 - Daily usage: 7 days
 - Monthly usage: 30 days
-- Processing locks: 60 seconds
+- Processing locks: 15 seconds (configurable)
 - Google OAuth tokens: 90 days
 - Injection logs: 90 days
 """
@@ -22,9 +22,9 @@ def ttl_for_plan() -> int:
     return int(time.time()) + (90 * _SECONDS_PER_DAY)
 
 
-def ttl_for_lock() -> int:
-    """60-second TTL for processing locks."""
-    return int(time.time()) + 60
+def ttl_for_lock(seconds: int = 15) -> int:
+    """TTL for processing locks. Default 15s, configurable for long operations."""
+    return int(time.time()) + seconds
 
 
 def ttl_for_daily_usage() -> int:
@@ -53,5 +53,5 @@ def ttl_for_secrets() -> int:
 
 
 def ttl_for_setup() -> int:
-    """7-day TTL for admin setup state records."""
-    return int(time.time()) + (7 * _SECONDS_PER_DAY)
+    """14-day TTL for admin setup state records."""
+    return int(time.time()) + (14 * _SECONDS_PER_DAY)

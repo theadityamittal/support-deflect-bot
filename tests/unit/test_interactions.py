@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlencode
 
 import pytest
+
 from slack.handler import _handle_interaction, lambda_handler
 from slack.models import EventType, SQSMessage
 
@@ -64,14 +65,7 @@ class TestParseBlockActionPayload:
     def test_parse_block_action_payload(self):
         """Valid block_actions payload is parsed without error."""
         body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs") as mock_enqueue,
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.return_value = MagicMock(allowed=True)
-            mock_chain_builder.return_value = mock_chain
-
+        with patch("slack.handler._enqueue_to_sqs") as mock_enqueue:
             result = _handle_interaction(body)
 
         assert result["statusCode"] == 200
@@ -105,14 +99,7 @@ class TestNormalizeInteractionToSQSMessage:
         body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
         captured: list[SQSMessage] = []
 
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs", side_effect=captured.append),
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.return_value = MagicMock(allowed=True)
-            mock_chain_builder.return_value = mock_chain
-
+        with patch("slack.handler._enqueue_to_sqs", side_effect=captured.append):
             _handle_interaction(body)
 
         assert len(captured) == 1
@@ -164,75 +151,12 @@ class TestNormalizeInteractionToSQSMessage:
         assert restored.event_type == EventType.INTERACTION
 
 
-class TestInteractionRunsThroughMiddleware:
-    def test_interaction_runs_through_middleware(self):
-        """Middleware chain is called for every interaction."""
-        body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
-
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs"),
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.return_value = MagicMock(allowed=True)
-            mock_chain_builder.return_value = mock_chain
-
-            _handle_interaction(body)
-
-        mock_chain_builder.assert_called_once_with(workspace_id="T456")
-        mock_chain.run.assert_called_once()
-
-    def test_middleware_receives_interaction_event_type(self):
-        """Middleware is passed a SlackEvent with INTERACTION type."""
-        body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
-        received_events: list = []
-
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs"),
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.side_effect = lambda e: (
-                received_events.append(e) or MagicMock(allowed=True)
-            )
-            mock_chain_builder.return_value = mock_chain
-
-            _handle_interaction(body)
-
-        assert len(received_events) == 1
-        assert received_events[0].event_type == EventType.INTERACTION
-
-    def test_middleware_blocked_does_not_enqueue(self):
-        """When middleware blocks, SQS is not called."""
-        body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
-
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs") as mock_enqueue,
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.return_value = MagicMock(allowed=False, reason="rate limit")
-            mock_chain_builder.return_value = mock_chain
-
-            result = _handle_interaction(body)
-
-        assert result["statusCode"] == 200
-        mock_enqueue.assert_not_called()
-
-
 class TestInteractionEnqueuedToSQS:
     def test_interaction_enqueued_to_sqs(self):
         """Allowed interaction is enqueued exactly once."""
         body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
 
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs") as mock_enqueue,
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.return_value = MagicMock(allowed=True)
-            mock_chain_builder.return_value = mock_chain
-
+        with patch("slack.handler._enqueue_to_sqs") as mock_enqueue:
             _handle_interaction(body)
 
         mock_enqueue.assert_called_once()
@@ -245,14 +169,7 @@ class TestInteractionEnqueuedToSQS:
         payload = {**_BLOCK_ACTION_PAYLOAD, "actions": []}
         body = _make_form_body(payload)
 
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs") as mock_enqueue,
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.return_value = MagicMock(allowed=True)
-            mock_chain_builder.return_value = mock_chain
-
+        with patch("slack.handler._enqueue_to_sqs") as mock_enqueue:
             _handle_interaction(body)
 
         mock_enqueue.assert_called_once()
@@ -265,14 +182,7 @@ class TestInteractionReturns200:
         """Successful interaction always returns 200."""
         body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
 
-        with (
-            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
-            patch("slack.handler._enqueue_to_sqs"),
-        ):
-            mock_chain = MagicMock()
-            mock_chain.run.return_value = MagicMock(allowed=True)
-            mock_chain_builder.return_value = mock_chain
-
+        with patch("slack.handler._enqueue_to_sqs"):
             result = _handle_interaction(body)
 
         assert result["statusCode"] == 200
@@ -301,15 +211,11 @@ class TestLambdaHandlerInteraction:
     @patch("slack.handler._get_signing_secret")
     @patch("slack.handler.verify_slack_signature")
     @patch("slack.handler._enqueue_to_sqs")
-    @patch("slack.handler._build_middleware_chain")
     def test_full_pipeline_via_lambda_handler(
-        self, mock_chain_builder, mock_enqueue, mock_verify, mock_secret
+        self, mock_enqueue, mock_verify, mock_secret
     ):
         """lambda_handler routes /slack/interactions through the full pipeline."""
         mock_secret.return_value = "secret"
-        mock_chain = MagicMock()
-        mock_chain.run.return_value = MagicMock(allowed=True)
-        mock_chain_builder.return_value = mock_chain
 
         body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
         event = _make_api_gw_interaction_event(body)
@@ -317,3 +223,106 @@ class TestLambdaHandlerInteraction:
 
         assert result["statusCode"] == 200
         mock_enqueue.assert_called_once()
+
+
+class TestEventIdIncludesActionId:
+    def test_event_id_includes_action_id(self):
+        """Event ID should include action_id for SQS FIFO dedup uniqueness."""
+        body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
+        captured: list[SQSMessage] = []
+
+        with patch("slack.handler._enqueue_to_sqs", side_effect=captured.append):
+            _handle_interaction(body)
+
+        assert len(captured) == 1
+        msg = captured[0]
+        assert msg.event_id == "interaction:T456:U123:123.456:calendar_confirm"
+
+    def test_event_id_empty_action_id(self):
+        """Event ID should have empty action_id segment when no actions."""
+        payload = {**_BLOCK_ACTION_PAYLOAD, "actions": []}
+        body = _make_form_body(payload)
+        captured: list[SQSMessage] = []
+
+        with patch("slack.handler._enqueue_to_sqs", side_effect=captured.append):
+            _handle_interaction(body)
+
+        assert len(captured) == 1
+        assert captured[0].event_id == "interaction:T456:U123:123.456:"
+
+
+class TestInteractionSkipsMiddleware:
+    def test_interaction_does_not_call_middleware(self):
+        """Interactions should skip the handler middleware chain entirely."""
+        body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
+
+        with (
+            patch("slack.handler._build_middleware_chain") as mock_chain_builder,
+            patch("slack.handler._enqueue_to_sqs"),
+        ):
+            _handle_interaction(body)
+
+        mock_chain_builder.assert_not_called()
+
+    def test_interaction_enqueues_without_middleware(self):
+        """Valid interaction should enqueue directly to SQS."""
+        body = _make_form_body(_BLOCK_ACTION_PAYLOAD)
+
+        with patch("slack.handler._enqueue_to_sqs") as mock_enqueue:
+            result = _handle_interaction(body)
+
+        assert result["statusCode"] == 200
+        mock_enqueue.assert_called_once()
+
+
+class TestActionValueExtraction:
+    def test_button_value_extracted_from_value_field(self):
+        """Button actions use 'value' field."""
+        payload = {
+            **_BLOCK_ACTION_PAYLOAD,
+            "actions": [{"action_id": "teams_confirm", "value": "confirmed"}],
+        }
+        body = _make_form_body(payload)
+        captured: list[SQSMessage] = []
+
+        with patch("slack.handler._enqueue_to_sqs", side_effect=captured.append):
+            _handle_interaction(body)
+
+        assert captured[0].action_value == "confirmed"
+
+    def test_dropdown_value_extracted_from_selected_option(self):
+        """static_select actions use 'selected_option.value'."""
+        payload = {
+            **_BLOCK_ACTION_PAYLOAD,
+            "actions": [
+                {
+                    "action_id": "channel_map_engineering",
+                    "type": "static_select",
+                    "selected_option": {
+                        "value": "C_ENG",
+                        "text": {"type": "plain_text", "text": "engineering"},
+                    },
+                }
+            ],
+        }
+        body = _make_form_body(payload)
+        captured: list[SQSMessage] = []
+
+        with patch("slack.handler._enqueue_to_sqs", side_effect=captured.append):
+            _handle_interaction(body)
+
+        assert captured[0].action_value == "C_ENG"
+
+    def test_no_value_or_selected_option_returns_empty(self):
+        """Action with neither value nor selected_option returns empty string."""
+        payload = {
+            **_BLOCK_ACTION_PAYLOAD,
+            "actions": [{"action_id": "some_action"}],
+        }
+        body = _make_form_body(payload)
+        captured: list[SQSMessage] = []
+
+        with patch("slack.handler._enqueue_to_sqs", side_effect=captured.append):
+            _handle_interaction(body)
+
+        assert captured[0].action_value == ""

@@ -176,7 +176,17 @@ def _handle_awaiting_url(
     *, text: str, action_id: str | None, state: SetupState, deps: SetupDependencies
 ) -> SetupState:
     """Validate URL, kick off scraping, transition to scraping step."""
-    url = text.strip()
+    if not text.strip():
+        deps.slack_client.send_message(
+            channel=state.admin_user_id,
+            text=(
+                "Please share your company's website URL (e.g. https://example.com)."
+            ),
+        )
+        return state
+
+    # Slack auto-links URLs: <https://example.com> or <https://example.com|example.com>
+    url = text.strip().strip("<>").split("|")[0]
     if not _is_valid_url(url):
         return _llm_fallback(
             text=text,
@@ -312,19 +322,52 @@ def _handle_teams(
             deps.state_store.save_setup_state(setup_state=new_state)
             return _transition_to_channels(state=new_state, deps=deps)
 
-    deps.slack_client.send_message(
-        channel=state.admin_user_id,
-        text="Please enter at least one team name.",
-    )
+    # Resume case: no action, no text — re-render current step
+    if state.teams:
+        blocks = team_confirmation(teams=list(state.teams))
+        deps.slack_client.send_message(
+            channel=state.admin_user_id,
+            text="Here are your teams:",
+            blocks=blocks,
+        )
+    else:
+        deps.slack_client.send_message(
+            channel=state.admin_user_id,
+            text=(
+                "Please type your team names separated by commas "
+                "(e.g. Engineering, Marketing, Sales)."
+            ),
+        )
     return state
 
 
 def _transition_to_channels(
     *, state: SetupState, deps: SetupDependencies
 ) -> SetupState:
-    """Fetch channels and show channel_mapping Block Kit."""
+    """Fetch channels, find #general as default, show channel_mapping Block Kit."""
     channels = deps.slack_client.list_channels()
-    blocks = channel_mapping(teams=list(state.teams), channels=channels)
+
+    # Find #general: is_general flag first, then name match, then first channel
+    default_channel = None
+    for ch in channels:
+        if ch.get("is_general"):
+            default_channel = ch
+            break
+    if default_channel is None:
+        for ch in channels:
+            if ch.get("name") == "general":
+                default_channel = ch
+                break
+    if default_channel is None and channels:
+        default_channel = channels[0]
+
+    # Pre-populate all teams mapped to default channel
+    default_id = default_channel["id"] if default_channel else ""
+    pre_mapping = {_slugify(t): default_id for t in state.teams}
+
+    blocks = channel_mapping(
+        teams=list(state.teams), channels=channels, default_channel=default_channel
+    )
 
     deps.slack_client.send_message(
         channel=state.admin_user_id,
@@ -332,7 +375,9 @@ def _transition_to_channels(
         blocks=blocks,
     )
 
-    new_state = replace(state, step="channels", updated_at=_now_iso())
+    new_state = replace(
+        state, step="channels", channel_mapping=pre_mapping, updated_at=_now_iso()
+    )
     deps.state_store.save_setup_state(setup_state=new_state)
     return new_state
 
@@ -340,28 +385,24 @@ def _transition_to_channels(
 def _handle_channels(
     *, text: str, action_id: str | None, state: SetupState, deps: SetupDependencies
 ) -> SetupState:
-    """Handle channel mapping selections.
+    """Handle channel mapping selections and confirm action.
 
-    action_id format: ``channel_map_<slug>`` with selected value in text.
-    When all teams are mapped, transitions to calendar step.
+    Dropdown selections update the mapping. The confirm button
+    triggers transition to calendar step.
     """
+    if action_id == "channel_mapping_confirm":
+        return _transition_to_calendar(state=state, deps=deps)
+
     if action_id and action_id.startswith("channel_map_"):
         selected_channel = text.strip()
-        # Extract slug from action_id
         slug = action_id[len("channel_map_") :]
         new_mapping = {**state.channel_mapping, slug: selected_channel}
         new_state = replace(state, channel_mapping=new_mapping, updated_at=_now_iso())
         deps.state_store.save_setup_state(setup_state=new_state)
-
-        # Check if all teams are mapped
-        expected_slugs = {_slugify(t) for t in state.teams}
-        mapped_slugs = set(new_mapping.keys())
-        if expected_slugs <= mapped_slugs:
-            return _transition_to_calendar(state=new_state, deps=deps)
-
         return new_state
 
-    return state
+    # Resume case: no recognized action — re-render channel mapping blocks
+    return _transition_to_channels(state=state, deps=deps)
 
 
 def _slugify(text: str) -> str:
@@ -400,7 +441,11 @@ def _handle_calendar(
             text=f"Please authorize Google Calendar access:\n{oauth_url}",
         )
         new_state = replace(
-            state, step="confirmation", calendar_enabled=True, updated_at=_now_iso()
+            state,
+            step="confirmation",
+            calendar_enabled=False,
+            calendar_oauth_initiated=True,
+            updated_at=_now_iso(),
         )
         deps.state_store.save_setup_state(setup_state=new_state)
         return _handle_confirmation(text="", action_id=None, state=new_state, deps=deps)
@@ -412,19 +457,27 @@ def _handle_calendar(
         deps.state_store.save_setup_state(setup_state=new_state)
         return _handle_confirmation(text="", action_id=None, state=new_state, deps=deps)
 
+    # Resume case: re-send calendar prompt
+    blocks = calendar_setup_prompt()
+    deps.slack_client.send_message(
+        channel=state.admin_user_id,
+        text="Would you like to enable Google Calendar integration?",
+        blocks=blocks,
+    )
     return state
 
 
-def _handle_confirmation(
-    *, text: str, action_id: str | None, state: SetupState, deps: SetupDependencies
-) -> SetupState:
-    """Show summary, write WorkspaceConfig, delete SETUP record, enqueue pending users."""
-    # Build summary
+def _send_summary(
+    *,
+    state: SetupState,
+    deps: SetupDependencies,
+    calendar_str: str,
+) -> None:
+    """Send the setup completion summary message."""
     teams_str = ", ".join(state.teams) if state.teams else "None"
     mapping_str = (
         ", ".join(f"{k} -> {v}" for k, v in state.channel_mapping.items()) or "None"
     )
-    calendar_str = "Enabled" if state.calendar_enabled else "Disabled"
 
     deps.slack_client.send_message(
         channel=state.admin_user_id,
@@ -438,6 +491,35 @@ def _handle_confirmation(
         ),
     )
 
+
+def _handle_confirmation(
+    *, text: str, action_id: str | None, state: SetupState, deps: SetupDependencies
+) -> SetupState:
+    """Show summary, write WorkspaceConfig, delete SETUP record, enqueue pending users."""
+    # Idempotency guard: if setup already completed, just re-send summary
+    existing_config = deps.state_store.get_workspace_config(
+        workspace_id=state.workspace_id
+    )
+    if existing_config is not None and existing_config.setup_complete:
+        calendar_str = "Enabled" if existing_config.calendar_enabled else "Disabled"
+        _send_summary(state=state, deps=deps, calendar_str=calendar_str)
+        return replace(state, step="done", updated_at=_now_iso())
+
+    # Determine calendar state — handle race with OAuth callback
+    calendar_enabled = (
+        existing_config.calendar_enabled if existing_config else False
+    ) or state.calendar_enabled
+
+    # Tri-state calendar summary
+    if state.calendar_oauth_initiated and not calendar_enabled:
+        calendar_str = "Pending authorization (check your browser)"
+    elif calendar_enabled:
+        calendar_str = "Enabled"
+    else:
+        calendar_str = "Disabled"
+
+    _send_summary(state=state, deps=deps, calendar_str=calendar_str)
+
     # Write WorkspaceConfig and delete SETUP record
     deps.state_store.complete_setup(
         workspace_id=state.workspace_id,
@@ -446,15 +528,14 @@ def _handle_confirmation(
             "website_url": state.website_url,
             "teams": list(state.teams),
             "channel_mapping": dict(state.channel_mapping),
-            "calendar_enabled": state.calendar_enabled,
+            "calendar_enabled": calendar_enabled,
         },
     )
 
     # Enqueue pending users
     _enqueue_pending_users(state=state, deps=deps)
 
-    new_state = replace(state, step="done", updated_at=_now_iso())
-    return new_state
+    return replace(state, step="done", updated_at=_now_iso())
 
 
 # ---------------------------------------------------------------------------

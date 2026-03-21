@@ -190,7 +190,7 @@ class UsageRecord:
 
 @dataclass(frozen=True)
 class SetupState:
-    """Transient admin setup state stored in DynamoDB (7-day TTL)."""
+    """Transient admin setup state stored in DynamoDB (14-day TTL)."""
 
     step: str  # e.g. "welcome", "awaiting_url", "scraping", "teams", "channels", "calendar", "confirmation"
     admin_user_id: str
@@ -200,6 +200,7 @@ class SetupState:
     teams: tuple[str, ...] = ()
     channel_mapping: dict[str, str] = field(default_factory=dict)
     calendar_enabled: bool = False
+    calendar_oauth_initiated: bool = False
     created_at: str = ""
     updated_at: str = ""
 

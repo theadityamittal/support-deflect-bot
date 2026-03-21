@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
+
 from state.dynamo import DynamoStateStore
 from state.models import (
     CompletionRecord,
@@ -516,7 +517,7 @@ class TestSetupState:
             Key={"pk": "WORKSPACE#W1", "sk": "SETUP"}
         )
 
-    def test_setup_state_has_7_day_ttl(self):
+    def test_setup_state_has_14_day_ttl(self):
         mock_table = MagicMock()
         store = self._make_store(mock_table)
         setup = self._make_setup_state()
@@ -526,8 +527,8 @@ class TestSetupState:
         after = int(time.time())
 
         item = mock_table.put_item.call_args[1]["Item"]
-        expected_min = before + (7 * 86400)
-        expected_max = after + (7 * 86400)
+        expected_min = before + (14 * 86400)
+        expected_max = after + (14 * 86400)
         assert expected_min <= item["ttl"] <= expected_max
 
 

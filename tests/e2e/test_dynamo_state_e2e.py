@@ -12,10 +12,10 @@ import contextlib
 from datetime import UTC, datetime
 
 import pytest
+
 from security.crypto import FieldEncryptor
 from state.dynamo import DynamoStateStore
 from state.models import SetupState
-
 from tests.e2e.conftest import E2E_WORKSPACE_ID
 
 

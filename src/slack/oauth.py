@@ -12,8 +12,9 @@ import os
 from typing import Any
 
 import boto3
-from security.crypto import FieldEncryptor
 from slack_sdk import WebClient
+
+from security.crypto import FieldEncryptor
 from state.dynamo import DynamoStateStore
 from state.models import SetupState
 
@@ -46,7 +47,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     team_name = token_response.get("team", {}).get("name", "your workspace")
     return _html_response(
         200,
-        f"Sherpa installed successfully in {team_name}! " "You can close this tab.",
+        f"Sherpa installed successfully in {team_name}! You can close this tab.",
     )
 
 
@@ -64,7 +65,7 @@ def _exchange_code_for_token(code: str) -> dict[str, Any]:
         ),
         code=code,
     )
-    result: dict[str, Any] = dict(response)
+    result: dict[str, Any] = dict(response.data)  # type: ignore[arg-type]
     return result
 
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import admin.kill_switch_check as _module
 import pytest
+
+import admin.kill_switch_check as _module
 
 
 @pytest.fixture(autouse=True)

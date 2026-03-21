@@ -109,6 +109,9 @@ class TestSettings:
         monkeypatch.setenv("DYNAMODB_TABLE_NAME", "test")
         monkeypatch.setenv("S3_BUCKET_NAME", "test")
         monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+        monkeypatch.setenv("SQS_QUEUE_URL", "")
+        monkeypatch.setenv("API_GATEWAY_ID", "")
+        monkeypatch.setenv("APP_SECRETS_ARN", "")
 
         from config.settings import Settings
 

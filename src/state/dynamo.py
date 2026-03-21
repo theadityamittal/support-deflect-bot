@@ -10,6 +10,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from botocore.exceptions import ClientError
+
 from state.models import CompletionRecord, OnboardingPlan, SetupState, WorkspaceConfig
 from state.ttl import (
     ttl_for_injection_log,
@@ -59,16 +60,23 @@ class DynamoStateStore:
         item = record.to_dynamo_item()
         self._table.put_item(Item=item)
 
-    def acquire_lock(self, *, workspace_id: str, user_id: str) -> bool:
-        """Acquire a processing lock. Returns True if acquired, False if held."""
+    def acquire_lock(
+        self, *, workspace_id: str, user_id: str, ttl_seconds: int = 15
+    ) -> bool:
+        """Acquire a processing lock. Returns True if acquired, False if held.
+
+        Overwrites expired locks immediately (DynamoDB TTL cleanup is lazy).
+        """
         try:
             self._table.put_item(
                 Item={
                     "pk": f"WORKSPACE#{workspace_id}",
                     "sk": f"LOCK#{user_id}",
-                    "ttl": ttl_for_lock(),
+                    "ttl": ttl_for_lock(seconds=ttl_seconds),
                 },
-                ConditionExpression="attribute_not_exists(pk)",
+                ConditionExpression="attribute_not_exists(pk) OR #ttl < :now",
+                ExpressionAttributeNames={"#ttl": "ttl"},
+                ExpressionAttributeValues={":now": int(time.time())},
             )
             return True
         except ClientError as e:
@@ -159,6 +167,27 @@ class DynamoStateStore:
             teams=tuple(item.get("teams", [])),
             channel_mapping=dict(item.get("channel_mapping", {})),
             calendar_enabled=item.get("calendar_enabled", False),
+        )
+
+    def update_workspace_config(
+        self, *, workspace_id: str, updates: dict[str, Any]
+    ) -> None:
+        """Partial update on the CONFIG record."""
+        if not updates:
+            return
+        expr_parts = []
+        attr_names: dict[str, str] = {}
+        attr_values: dict[str, Any] = {}
+        for key, value in updates.items():
+            safe_key = f"#{key}"
+            attr_names[safe_key] = key
+            attr_values[f":{key}"] = value
+            expr_parts.append(f"{safe_key} = :{key}")
+        self._table.update_item(
+            Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "CONFIG"},
+            UpdateExpression="SET " + ", ".join(expr_parts),
+            ExpressionAttributeNames=attr_names,
+            ExpressionAttributeValues=attr_values,
         )
 
     def get_daily_usage_turns(self, *, workspace_id: str, user_id: str) -> int:
@@ -330,7 +359,7 @@ class DynamoStateStore:
         raise ValueError(msg)
 
     def save_setup_state(self, *, setup_state: SetupState) -> None:
-        """Save or update admin setup state with 7-day TTL."""
+        """Save or update admin setup state with 14-day TTL."""
         self._table.put_item(
             Item={
                 "pk": f"WORKSPACE#{setup_state.workspace_id}",
@@ -343,6 +372,7 @@ class DynamoStateStore:
                 "teams": list(setup_state.teams),
                 "channel_mapping": dict(setup_state.channel_mapping),
                 "calendar_enabled": setup_state.calendar_enabled,
+                "calendar_oauth_initiated": setup_state.calendar_oauth_initiated,
                 "created_at": setup_state.created_at,
                 "updated_at": setup_state.updated_at,
                 "ttl": ttl_for_setup(),
@@ -366,6 +396,7 @@ class DynamoStateStore:
             teams=tuple(item.get("teams", [])),
             channel_mapping=dict(item.get("channel_mapping", {})),
             calendar_enabled=item.get("calendar_enabled", False),
+            calendar_oauth_initiated=item.get("calendar_oauth_initiated", False),
             created_at=item.get("created_at", ""),
             updated_at=item.get("updated_at", ""),
         )

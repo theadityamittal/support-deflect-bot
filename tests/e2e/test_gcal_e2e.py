@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+
 from gcal.client import GoogleCalendarClient
 
 _CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"

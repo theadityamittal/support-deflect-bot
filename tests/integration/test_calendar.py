@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+
 from agent.tools.calendar_event import CalendarEventTool
 from gcal import callback as gcal_cb
 from gcal.client import GoogleCalendarClient
