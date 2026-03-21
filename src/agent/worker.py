@@ -65,6 +65,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             event_type = message.get("event_type", "message")
             metadata = message.get("metadata") or {}
             action_id = metadata.get("action_id")
+            action_value = metadata.get("action_value") or ""
             thread_ts = metadata.get("thread_ts") or message.get("thread_ts")
 
             logger.info(
@@ -138,8 +139,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                         logger.debug(
                             "Routing admin user=%s to setup state machine", user_id
                         )
+                        # For interactions, pass action_value as text (dropdowns put selection there)
+                        setup_text = (
+                            action_value
+                            if event_type == "interaction" and action_value
+                            else text
+                        )
                         _call_process_setup_message(
-                            text=text,
+                            text=setup_text,
                             action_id=action_id,
                             setup_state=setup_state,
                             slack_client=slack_client,
