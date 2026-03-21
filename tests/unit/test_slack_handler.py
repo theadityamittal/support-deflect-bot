@@ -6,12 +6,28 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from slack.handler import (
     _build_middleware_chain,
     _check_setup_gating,
     _send_ephemeral_rejection,
     lambda_handler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_kill_switch():
+    """Prevent unit tests from hitting real DynamoDB for kill switch checks."""
+    with patch("admin.kill_switch_check.is_kill_switch_active", return_value=False):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _mock_state_store():
+    """Prevent unit tests from creating real boto3 DynamoDB resources."""
+    with patch("slack.handler._get_state_store", return_value=MagicMock()):
+        yield
+
 
 _EVENT_BODY = {
     "type": "event_callback",
@@ -134,7 +150,7 @@ class TestSlackHandlerLambda:
         event = _make_api_gw_event(
             path="/slack/commands",
             body={
-                "command": "/onboard-help",
+                "command": "/sherpa-help",
                 "user_id": "U123",
                 "team_id": "W456",
                 "channel_id": "C789",
@@ -513,3 +529,37 @@ class TestSendSetupPendingDm:
 
         # Should not raise
         _send_setup_pending_dm(workspace_id="W1", user_id="U1")
+
+
+class TestHandlerKillSwitch:
+    @patch("slack.handler._get_signing_secret", return_value="test-secret")
+    @patch("slack.handler.verify_slack_signature")
+    @patch("admin.kill_switch_check.is_kill_switch_active", return_value=True)
+    @patch("slack.handler._get_state_store")
+    def test_returns_200_when_kill_switch_active(
+        self, mock_store, mock_kill, mock_verify, mock_secret
+    ):
+        """Handler returns 200 and skips enqueue when kill switch is on."""
+        event = {
+            "path": "/slack/events",
+            "headers": {
+                "X-Slack-Request-Timestamp": "123",
+                "X-Slack-Signature": "v0=abc",
+            },
+            "body": json.dumps(
+                {
+                    "type": "event_callback",
+                    "event": {
+                        "type": "message",
+                        "user": "U1",
+                        "text": "hi",
+                        "channel": "C1",
+                        "ts": "1",
+                    },
+                    "event_id": "Ev1",
+                    "team_id": "W1",
+                }
+            ),
+        }
+        result = lambda_handler(event, None)
+        assert result["statusCode"] == 200

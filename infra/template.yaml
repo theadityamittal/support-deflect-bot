@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Onboard Assist - Adaptive AI onboarding Slack bot for nonprofits.
-  7 Lambda functions, API Gateway, SQS FIFO, DynamoDB, S3.
+  Sherpa - Adaptive AI onboarding Slack bot for nonprofits.
+  6 Lambda functions, API Gateway, SQS FIFO, DynamoDB, S3.
 
 Globals:
   Function:
@@ -18,14 +18,14 @@ Globals:
         DYNAMODB_TABLE_NAME: !Ref StateTable
         S3_BUCKET_NAME: !Ref DocumentBucket
         PINECONE_INDEX_NAME: !Ref PineconeIndexName
-        POWERTOOLS_SERVICE_NAME: onboard-assist
+        POWERTOOLS_SERVICE_NAME: sherpa
         POWERTOOLS_LOG_LEVEL: INFO
         LOG_LEVEL: INFO
 
 Parameters:
   PineconeIndexName:
     Type: String
-    Default: onboard-assist
+    Default: sherpa
   KillSwitchBudgetAmount:
     Type: Number
     Default: 5
@@ -41,7 +41,7 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: prod
-      Description: Onboard Assist API - 5 routes
+      Description: Sherpa API - 5 routes
 
   # ============================================================
   # Lambda Layer (shared dependencies)
@@ -49,7 +49,7 @@ Resources:
   DepsLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: onboard-assist-deps
+      LayerName: sherpa-deps
       ContentUri: layers/deps
       Description: Python dependencies for all Lambda functions
       CompatibleRuntimes:
@@ -61,12 +61,12 @@ Resources:
       BuildArchitecture: arm64
 
   # ============================================================
-  # Lambda Functions (7)
+  # Lambda Functions (6)
   # ============================================================
   SlackHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: onboard-assist-slack-handler
+      FunctionName: sherpa-slack-handler
       Handler: slack.handler.lambda_handler
       CodeUri: ../src
       Timeout: 10
@@ -111,7 +111,7 @@ Resources:
   SlackOAuthFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: onboard-assist-slack-oauth
+      FunctionName: sherpa-slack-oauth
       Handler: slack.oauth.lambda_handler
       CodeUri: ../src
       Environment:
@@ -141,7 +141,7 @@ Resources:
   GoogleOAuthCallbackFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: onboard-assist-google-oauth
+      FunctionName: sherpa-google-oauth
       Handler: gcal.callback.lambda_handler
       CodeUri: ../src
       Environment:
@@ -171,7 +171,7 @@ Resources:
   AgentWorkerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: onboard-assist-agent-worker
+      FunctionName: sherpa-agent-worker
       Handler: agent.worker.lambda_handler
       CodeUri: ../src
       Timeout: 900
@@ -203,7 +203,7 @@ Resources:
   KillSwitchFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: onboard-assist-kill-switch
+      FunctionName: sherpa-kill-switch
       Handler: admin.kill_switch.lambda_handler
       CodeUri: ../src
       Events:
@@ -223,7 +223,7 @@ Resources:
   HealthCheckFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: onboard-assist-health-check
+      FunctionName: sherpa-health-check
       Handler: admin.health_check.lambda_handler
       CodeUri: ../src
       Events:
@@ -236,31 +236,13 @@ Resources:
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref AppSecrets
 
-  NudgeFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: onboard-assist-nudge
-      Handler: admin.nudge.lambda_handler
-      CodeUri: ../src
-      Events:
-        DailyNudge:
-          Type: Schedule
-          Properties:
-            Schedule: cron(0 14 * * ? *)
-            Description: Daily inactivity nudge at 2 PM UTC
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref StateTable
-        - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref AppSecrets
-
   # ============================================================
   # SQS
   # ============================================================
   MessageQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: onboard-assist-queue.fifo
+      QueueName: sherpa-queue.fifo
       FifoQueue: true
       ContentBasedDeduplication: false
       VisibilityTimeout: 900
@@ -271,7 +253,7 @@ Resources:
   DeadLetterQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: onboard-assist-dlq.fifo
+      QueueName: sherpa-dlq.fifo
       FifoQueue: true
 
   # ============================================================
@@ -280,7 +262,7 @@ Resources:
   StateTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: onboard-assist
+      TableName: sherpa
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -302,7 +284,7 @@ Resources:
   DocumentBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "onboard-assist-docs-${AWS::AccountId}"
+      BucketName: !Sub "sherpa-docs-${AWS::AccountId}"
       VersioningConfiguration:
         Status: Enabled
       LifecycleConfiguration:
@@ -332,7 +314,7 @@ Resources:
   SecretsEncryptionKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: alias/onboard-assist-secrets
+      AliasName: alias/sherpa-secrets
       TargetKeyId: !Ref SecretsEncryptionKey
 
   # ============================================================
@@ -341,7 +323,7 @@ Resources:
   AppSecrets:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: onboard-assist/secrets
+      Name: sherpa/secrets
       Description: Consolidated app secrets (Slack, Pinecone, Gemini, Google OAuth)
 
   # ============================================================
@@ -350,7 +332,7 @@ Resources:
   BudgetAlarmTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: onboard-assist-budget-alarm
+      TopicName: sherpa-budget-alarm
 
   # ============================================================
   # AWS Budget
@@ -359,7 +341,7 @@ Resources:
     Type: AWS::Budgets::Budget
     Properties:
       Budget:
-        BudgetName: onboard-assist-monthly
+        BudgetName: sherpa-monthly
         BudgetLimit:
           Amount: !Ref KillSwitchBudgetAmount
           Unit: USD
@@ -397,7 +379,7 @@ Resources:
   DLQAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: onboard-assist-dlq-messages
+      AlarmName: sherpa-dlq-messages
       AlarmDescription: Messages in DLQ (processing failures)
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
@@ -413,7 +395,7 @@ Resources:
   LambdaErrorRateAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: onboard-assist-lambda-error-rate
+      AlarmName: sherpa-lambda-error-rate
       AlarmDescription: Agent Worker Lambda error rate > 5% over 5 minutes
       Metrics:
         - Id: errors
@@ -450,7 +432,7 @@ Resources:
   BudgetWarningAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: onboard-assist-budget-warning
+      AlarmName: sherpa-budget-warning
       AlarmDescription: AWS spend approaching budget limit
       Namespace: AWS/Billing
       MetricName: EstimatedCharges
@@ -476,3 +458,6 @@ Outputs:
   TableName:
     Description: DynamoDB table name
     Value: !Ref StateTable
+  BucketName:
+    Description: S3 document bucket name
+    Value: !Ref DocumentBucket

@@ -9,17 +9,17 @@ class TestSettings:
 
     def test_default_settings_load(self, monkeypatch):
         """Settings load with required env vars."""
-        monkeypatch.setenv("PINECONE_INDEX_NAME", "onboard-assist")
-        monkeypatch.setenv("DYNAMODB_TABLE_NAME", "onboard-assist")
-        monkeypatch.setenv("S3_BUCKET_NAME", "onboard-assist-docs")
+        monkeypatch.setenv("PINECONE_INDEX_NAME", "sherpa")
+        monkeypatch.setenv("DYNAMODB_TABLE_NAME", "sherpa")
+        monkeypatch.setenv("S3_BUCKET_NAME", "sherpa-docs")
         monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
 
         from config.settings import Settings
 
         settings = Settings()
-        assert settings.pinecone_index_name == "onboard-assist"
-        assert settings.dynamodb_table_name == "onboard-assist"
-        assert settings.s3_bucket_name == "onboard-assist-docs"
+        assert settings.pinecone_index_name == "sherpa"
+        assert settings.dynamodb_table_name == "sherpa"
+        assert settings.s3_bucket_name == "sherpa-docs"
         assert settings.aws_region == "us-east-1"
 
     def test_chunk_size_defaults(self, monkeypatch):

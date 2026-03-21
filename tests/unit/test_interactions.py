@@ -7,8 +7,24 @@ import json
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlencode
 
+import pytest
 from slack.handler import _handle_interaction, lambda_handler
 from slack.models import EventType, SQSMessage
+
+
+@pytest.fixture(autouse=True)
+def _disable_kill_switch():
+    """Prevent unit tests from hitting real DynamoDB for kill switch checks."""
+    with patch("admin.kill_switch_check.is_kill_switch_active", return_value=False):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _mock_state_store():
+    """Prevent unit tests from creating real boto3 DynamoDB resources."""
+    with patch("slack.handler._get_state_store", return_value=MagicMock()):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Helpers

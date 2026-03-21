@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Check Pinecone index health."""
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "onboard-assist")
+    index_name = os.environ.get("PINECONE_INDEX_NAME", "sherpa")
 
     try:
         pc = _get_pinecone_client()

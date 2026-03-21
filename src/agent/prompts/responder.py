@@ -31,7 +31,7 @@ def build_response_prompt(
             plan_context = f"Current step: {current_step.title}"
 
     system = (
-        "You are Onboard Assist, writing a response to a volunteer.\n\n"
+        "You are Sherpa, writing a response to a volunteer.\n\n"
         "Guidelines:\n"
         "- Be warm, concise, and helpful\n"
         "- Use the tool results to inform your answer\n"

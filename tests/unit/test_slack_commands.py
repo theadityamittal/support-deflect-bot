@@ -46,7 +46,7 @@ class TestHandleCommand:
             ],
         )
         response = handle_command(
-            _make_command("/onboard-status"), state_store=mock_store
+            _make_command("/sherpa-status"), state_store=mock_store
         )
         assert response["statusCode"] == 200
         body = response["body"]
@@ -56,23 +56,21 @@ class TestHandleCommand:
         mock_store = MagicMock()
         mock_store.get_plan.return_value = None
         response = handle_command(
-            _make_command("/onboard-status"), state_store=mock_store
+            _make_command("/sherpa-status"), state_store=mock_store
         )
         assert response["statusCode"] == 200
         assert "no active" in response["body"].lower()
 
     def test_help_returns_static(self):
         mock_store = MagicMock()
-        response = handle_command(
-            _make_command("/onboard-help"), state_store=mock_store
-        )
+        response = handle_command(_make_command("/sherpa-help"), state_store=mock_store)
         assert response["statusCode"] == 200
-        assert "/onboard-status" in response["body"]
+        assert "/sherpa-status" in response["body"]
 
     def test_restart_returns_confirmation(self):
         mock_store = MagicMock()
         response = handle_command(
-            _make_command("/onboard-restart"), state_store=mock_store
+            _make_command("/sherpa-restart"), state_store=mock_store
         )
         assert response["statusCode"] == 200
         assert (
@@ -121,7 +119,7 @@ class TestOnboardSetup:
         )
         mock_store.get_setup_state.return_value = None
         response = handle_command(
-            _make_command("/onboard-setup", user_id="OTHER_USER"),
+            _make_command("/sherpa-setup", user_id="OTHER_USER"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200
@@ -135,7 +133,7 @@ class TestOnboardSetup:
         )
         mock_store.get_setup_state.return_value = _make_setup_state(step="awaiting_url")
         response = handle_command(
-            _make_command("/onboard-setup", user_id="ADMIN1"),
+            _make_command("/sherpa-setup", user_id="ADMIN1"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200
@@ -151,7 +149,7 @@ class TestOnboardSetup:
         )
         mock_store.get_setup_state.return_value = None
         response = handle_command(
-            _make_command("/onboard-setup", user_id="ADMIN1"),
+            _make_command("/sherpa-setup", user_id="ADMIN1"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200
@@ -163,7 +161,7 @@ class TestOnboardSetup:
         mock_store.get_workspace_config.return_value = None
         mock_store.get_setup_state.return_value = None
         response = handle_command(
-            _make_command("/onboard-setup", user_id="ADMIN1"),
+            _make_command("/sherpa-setup", user_id="ADMIN1"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200
@@ -180,7 +178,7 @@ class TestOnboardCalendar:
             setup_complete=True,
         )
         response = handle_command(
-            _make_command("/onboard-calendar", user_id="OTHER_USER"),
+            _make_command("/sherpa-calendar", user_id="OTHER_USER"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200
@@ -194,7 +192,7 @@ class TestOnboardCalendar:
             setup_complete=False,
         )
         response = handle_command(
-            _make_command("/onboard-calendar", user_id="ADMIN1"),
+            _make_command("/sherpa-calendar", user_id="ADMIN1"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200
@@ -209,7 +207,7 @@ class TestOnboardCalendar:
             calendar_enabled=True,
         )
         response = handle_command(
-            _make_command("/onboard-calendar", user_id="ADMIN1"),
+            _make_command("/sherpa-calendar", user_id="ADMIN1"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200
@@ -226,7 +224,7 @@ class TestOnboardCalendar:
             calendar_enabled=False,
         )
         response = handle_command(
-            _make_command("/onboard-calendar", user_id="ADMIN1"),
+            _make_command("/sherpa-calendar", user_id="ADMIN1"),
             state_store=mock_store,
         )
         assert response["statusCode"] == 200

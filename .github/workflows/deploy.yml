@@ -39,7 +39,7 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --resolve-s3 \
-            --stack-name onboard-assist \
+            --stack-name sherpa \
             --capabilities CAPABILITY_IAM
 
       - name: Deployment Status

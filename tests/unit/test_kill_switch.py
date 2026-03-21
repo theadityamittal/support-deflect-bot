@@ -21,7 +21,7 @@ class TestKillSwitchLambda:
                     "Sns": {
                         "Message": json.dumps(
                             {
-                                "budgetName": "onboard-assist-monthly",
+                                "budgetName": "sherpa-monthly",
                                 "notificationType": "ACTUAL",
                                 "threshold": "100",
                             }

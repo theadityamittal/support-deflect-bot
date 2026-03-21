@@ -140,7 +140,7 @@ class TestSlackEvent:
 class TestSlackCommand:
     def test_from_command_body(self):
         body = {
-            "command": "/onboard-status",
+            "command": "/sherpa-status",
             "user_id": "U123",
             "team_id": "W456",
             "channel_id": "C789",
@@ -149,7 +149,7 @@ class TestSlackCommand:
             "response_url": "https://hooks.slack.com/commands/xxx",
         }
         cmd = SlackCommand.from_command_body(body)
-        assert cmd.command == "/onboard-status"
+        assert cmd.command == "/sherpa-status"
         assert cmd.user_id == "U123"
         assert cmd.workspace_id == "W456"
 

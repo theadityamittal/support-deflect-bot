@@ -6,24 +6,18 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-from middleware.inbound.chain import InboundMiddlewareChain
+from middleware.inbound.chain import HandlerMiddlewareChain, WorkerMiddlewareChain
 from slack.models import EventType, SlackEvent, SQSMessage
 
 
 @pytest.mark.integration
 class TestSlackPipelineIntegration:
     def test_normal_message_passes_full_chain(self):
-        """A normal user message should pass all middleware checks."""
+        """A normal user message should pass both handler and worker middleware."""
         mock_store = MagicMock()
         mock_store.acquire_lock.return_value = True
         mock_store.get_daily_usage_turns.return_value = 5
         mock_store.get_monthly_usage_cost.return_value = 0.50
-
-        chain = InboundMiddlewareChain(
-            state_store=mock_store,
-            max_turns_per_day=50,
-            max_monthly_cost=5.0,
-        )
 
         event = SlackEvent(
             event_id="Ev001",
@@ -35,8 +29,19 @@ class TestSlackPipelineIntegration:
             timestamp="123.456",
         )
 
-        result = chain.run(event)
-        assert result.allowed is True
+        # Handler chain (runs in Slack Handler Lambda)
+        handler_chain = HandlerMiddlewareChain(state_store=mock_store)
+        handler_result = handler_chain.run(event)
+        assert handler_result.allowed is True
+
+        # Worker chain (runs in Agent Worker Lambda after SQS dequeue)
+        worker_chain = WorkerMiddlewareChain(
+            state_store=mock_store,
+            max_turns_per_day=50,
+            max_monthly_cost=5.0,
+        )
+        worker_result = worker_chain.run(event)
+        assert worker_result.allowed is True
 
         # Verify SQS message can be constructed
         sqs_msg = SQSMessage(
@@ -61,13 +66,9 @@ class TestSlackPipelineIntegration:
         assert restored.text == event.text
 
     def test_bot_message_short_circuits(self):
-        """Bot message should be dropped without any DynamoDB calls."""
+        """Bot message should be dropped by handler without any DynamoDB calls."""
         mock_store = MagicMock()
-        chain = InboundMiddlewareChain(
-            state_store=mock_store,
-            max_turns_per_day=50,
-            max_monthly_cost=5.0,
-        )
+        chain = HandlerMiddlewareChain(state_store=mock_store)
 
         event = SlackEvent(
             event_id="Ev002",
@@ -85,11 +86,10 @@ class TestSlackPipelineIntegration:
         mock_store.acquire_lock.assert_not_called()
 
     def test_injection_attempt_logged_and_blocked(self):
-        """Injection attempt should be blocked and logged."""
+        """Injection attempt should be blocked by worker middleware and logged."""
         mock_store = MagicMock()
-        mock_store.acquire_lock.return_value = True
 
-        chain = InboundMiddlewareChain(
+        chain = WorkerMiddlewareChain(
             state_store=mock_store,
             max_turns_per_day=50,
             max_monthly_cost=5.0,
@@ -110,17 +110,11 @@ class TestSlackPipelineIntegration:
         mock_store.log_injection_attempt.assert_called_once()
 
     def test_team_join_event_passes_chain(self):
-        """team_join should pass all middleware despite empty text."""
+        """team_join should pass both handler and worker middleware despite empty text."""
         mock_store = MagicMock()
         mock_store.acquire_lock.return_value = True
         mock_store.get_daily_usage_turns.return_value = 0
         mock_store.get_monthly_usage_cost.return_value = 0.0
-
-        chain = InboundMiddlewareChain(
-            state_store=mock_store,
-            max_turns_per_day=50,
-            max_monthly_cost=5.0,
-        )
 
         event = SlackEvent(
             event_id="Ev004",
@@ -132,5 +126,14 @@ class TestSlackPipelineIntegration:
             timestamp="123.456",
         )
 
-        result = chain.run(event)
-        assert result.allowed is True
+        handler_chain = HandlerMiddlewareChain(state_store=mock_store)
+        handler_result = handler_chain.run(event)
+        assert handler_result.allowed is True
+
+        worker_chain = WorkerMiddlewareChain(
+            state_store=mock_store,
+            max_turns_per_day=50,
+            max_monthly_cost=5.0,
+        )
+        worker_result = worker_chain.run(event)
+        assert worker_result.allowed is True

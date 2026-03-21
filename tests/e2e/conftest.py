@@ -19,18 +19,12 @@ sys.path.insert(0, str(os.path.join(os.path.dirname(__file__), "..", "..", "src"
 
 load_dotenv()
 
-API_GATEWAY_URL = os.getenv(
-    "API_GATEWAY_URL",
-    "https://w7x89hdhpj.execute-api.us-east-1.amazonaws.com/prod",
-)
-SQS_QUEUE_URL = os.getenv(
-    "SQS_QUEUE_URL",
-    "https://sqs.us-east-1.amazonaws.com/962273458473/onboard-assist-queue.fifo",
-)
-DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE_NAME", "onboard-assist")
-S3_BUCKET = os.getenv("S3_BUCKET_NAME", "onboard-assist-docs-962273458473")
+API_GATEWAY_URL = os.getenv("API_GATEWAY_URL", "")
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
+DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE_NAME", "")
+S3_BUCKET = os.getenv("S3_BUCKET_NAME", "")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "onboard-assist")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "sherpa")
 SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 
 E2E_WORKSPACE_ID = "E2E_TEST_WORKSPACE"
@@ -43,6 +37,8 @@ GOOGLE_REFRESH_TOKEN_ENV = os.getenv("GOOGLE_REFRESH_TOKEN", "")
 
 @pytest.fixture()
 def api_base_url() -> str:
+    if not API_GATEWAY_URL:
+        pytest.skip("API_GATEWAY_URL not set")
     return API_GATEWAY_URL
 
 
@@ -73,6 +69,8 @@ def test_namespace(pinecone_store):
 
 @pytest.fixture()
 def s3_storage():
+    if not S3_BUCKET:
+        pytest.skip("S3_BUCKET_NAME not set")
     from rag.storage import S3Storage
 
     return S3Storage(bucket_name=S3_BUCKET)
@@ -94,11 +92,15 @@ def s3_test_namespace(s3_storage):
 
 @pytest.fixture()
 def sqs_queue_url() -> str:
+    if not SQS_QUEUE_URL:
+        pytest.skip("SQS_QUEUE_URL not set")
     return SQS_QUEUE_URL
 
 
 @pytest.fixture()
 def dynamodb_table():
+    if not DYNAMODB_TABLE:
+        pytest.skip("DYNAMODB_TABLE_NAME not set")
     return boto3.resource("dynamodb").Table(DYNAMODB_TABLE)
 
 

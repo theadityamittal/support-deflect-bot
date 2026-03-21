@@ -1,10 +1,10 @@
 """Slash command handlers for Slack.
 
-/onboard-status -- show onboarding progress
-/onboard-help -- list available commands
-/onboard-restart -- confirm and restart onboarding
-/onboard-setup -- admin workspace setup
-/onboard-calendar -- admin calendar configuration
+/sherpa-status -- show onboarding progress
+/sherpa-help -- list available commands
+/sherpa-restart -- confirm and restart onboarding
+/sherpa-setup -- admin workspace setup
+/sherpa-calendar -- admin calendar configuration
 """
 
 from __future__ import annotations
@@ -30,11 +30,11 @@ def handle_command(
     state_store: DynamoStateStore,
 ) -> dict[str, Any]:
     handlers = {
-        "/onboard-status": _handle_status,
-        "/onboard-help": _handle_help,
-        "/onboard-restart": _handle_restart,
-        "/onboard-setup": _handle_setup,
-        "/onboard-calendar": _handle_calendar,
+        "/sherpa-status": _handle_status,
+        "/sherpa-help": _handle_help,
+        "/sherpa-restart": _handle_restart,
+        "/sherpa-setup": _handle_setup,
+        "/sherpa-calendar": _handle_calendar,
     }
     handler = handlers.get(command.command, _handle_unknown)
     return handler(command, state_store=state_store)
@@ -75,10 +75,10 @@ def _handle_help(
     state_store: DynamoStateStore,
 ) -> dict[str, Any]:
     text = (
-        "*Onboard Assist Commands*\n"
-        "• `/onboard-status` — View your onboarding progress\n"
-        "• `/onboard-help` — Show this help message\n"
-        "• `/onboard-restart` — Restart your onboarding (with confirmation)"
+        "*Sherpa Commands*\n"
+        "• `/sherpa-status` — View your onboarding progress\n"
+        "• `/sherpa-help` — Show this help message\n"
+        "• `/sherpa-restart` — Restart your onboarding (with confirmation)"
     )
     return _response(text)
 
@@ -149,7 +149,7 @@ def _handle_calendar(
         return _response("Only the workspace admin can run setup.")
 
     if config is None or not config.setup_complete:
-        return _response("Workspace setup is not complete. Run `/onboard-setup` first.")
+        return _response("Workspace setup is not complete. Run `/sherpa-setup` first.")
 
     if config.calendar_enabled:
         blocks = relink_calendar(current_email="(linked account)")
@@ -166,7 +166,7 @@ def _handle_unknown(
 ) -> dict[str, Any]:
     return _response(
         f"Unknown command: `{command.command}`. "
-        "Try `/onboard-help` for available commands."
+        "Try `/sherpa-help` for available commands."
     )
 
 

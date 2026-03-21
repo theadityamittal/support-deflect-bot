@@ -46,8 +46,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     team_name = token_response.get("team", {}).get("name", "your workspace")
     return _html_response(
         200,
-        f"Onboard Assist installed successfully in {team_name}! "
-        "You can close this tab.",
+        f"Sherpa installed successfully in {team_name}! " "You can close this tab.",
     )
 
 
@@ -71,7 +70,7 @@ def _exchange_code_for_token(code: str) -> dict[str, Any]:
 
 def _save_workspace_config(token_response: dict[str, Any]) -> None:
     """Store workspace config, encrypted secrets, setup state and send welcome DM."""
-    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
+    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "sherpa")
     kms_key_id = os.environ.get("KMS_KEY_ID", "")
 
     table = boto3.resource("dynamodb").Table(table_name)

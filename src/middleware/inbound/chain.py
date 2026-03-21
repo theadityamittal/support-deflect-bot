@@ -1,12 +1,10 @@
-"""Ordered inbound middleware chain.
+"""Inbound middleware chains — split between handler and worker.
 
-Runs checks cheapest-to-most-expensive:
-1. EventTypeFilter (CPU — allowlist event types + subtypes)
-2. BotFilter (CPU — bot_id + self-ID check)
-3. EmptyFilter (CPU — skipped for TEAM_JOIN)
-4. ConcurrencyGuard (1 DynamoDB write)
-5. InputSanitizer (CPU + conditional DynamoDB write — skipped for TEAM_JOIN)
-6. TokenBudgetGuard (2 DynamoDB reads)
+HandlerMiddlewareChain: CPU-only filters + ConcurrencyGuard (1 DynamoDB write).
+  Runs in the Slack Handler Lambda. Must complete within Slack's 3-second timeout.
+
+WorkerMiddlewareChain: InputSanitizer + TokenBudgetGuard (2-3 DynamoDB operations).
+  Runs in the Agent Worker Lambda after SQS dequeue.
 """
 
 from __future__ import annotations
@@ -25,33 +23,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_SKIP_TEXT_FILTERS = {EventType.TEAM_JOIN, EventType.INTERACTION}
 
-class InboundMiddlewareChain:
-    """Run all inbound middleware in order, short-circuiting on failure."""
+
+class HandlerMiddlewareChain:
+    """Runs in Slack Handler Lambda. CPU filters + ConcurrencyGuard."""
 
     def __init__(
         self,
         *,
         state_store: DynamoStateStore,
         bot_user_id: str = "",
-        max_turns_per_day: int = 50,
-        max_monthly_cost: float = 5.0,
-        strike_limit: int = 3,
-        max_message_length: int = 4000,
     ) -> None:
         self._event_type_filter = EventTypeFilter()
         self._bot_filter = BotFilter(bot_user_id=bot_user_id)
         self._concurrency_guard = ConcurrencyGuard(state_store=state_store)
-        self._sanitizer = InputSanitizer(
-            state_store=state_store,
-            strike_limit=strike_limit,
-            max_length=max_message_length,
-        )
-        self._budget_guard = TokenBudgetGuard(
-            state_store=state_store,
-            max_turns_per_day=max_turns_per_day,
-            max_monthly_cost=max_monthly_cost,
-        )
 
     def run(self, event: SlackEvent) -> MiddlewareResult:
         # 1. EventTypeFilter (CPU only)
@@ -64,10 +50,8 @@ class InboundMiddlewareChain:
         if not result.allowed:
             return result
 
-        # Text-content filters (skip for non-text events like TEAM_JOIN or INTERACTION)
-        _skip_text_filters = {EventType.TEAM_JOIN, EventType.INTERACTION}
-        if event.event_type not in _skip_text_filters:
-            # 3. EmptyFilter (CPU only)
+        # 3. EmptyFilter (CPU only, skipped for TEAM_JOIN/INTERACTION)
+        if event.event_type not in _SKIP_TEXT_FILTERS:
             result = EmptyFilter.check(event)
             if not result.allowed:
                 return result
@@ -77,9 +61,35 @@ class InboundMiddlewareChain:
         if not result.allowed:
             return result
 
-        # Text-content sanitization (skip for TEAM_JOIN or INTERACTION)
-        if event.event_type not in _skip_text_filters:
-            # 5. InputSanitizer (CPU + conditional DynamoDB write)
+        return MiddlewareResult.allow()
+
+
+class WorkerMiddlewareChain:
+    """Runs in Agent Worker Lambda. DynamoDB-heavy checks."""
+
+    def __init__(
+        self,
+        *,
+        state_store: DynamoStateStore,
+        max_turns_per_day: int = 50,
+        max_monthly_cost: float = 5.0,
+        strike_limit: int = 3,
+        max_message_length: int = 4000,
+    ) -> None:
+        self._sanitizer = InputSanitizer(
+            state_store=state_store,
+            strike_limit=strike_limit,
+            max_length=max_message_length,
+        )
+        self._budget_guard = TokenBudgetGuard(
+            state_store=state_store,
+            max_turns_per_day=max_turns_per_day,
+            max_monthly_cost=max_monthly_cost,
+        )
+
+    def run(self, event: SlackEvent) -> MiddlewareResult:
+        # 5. InputSanitizer (CPU + conditional DynamoDB write, skipped for TEAM_JOIN/INTERACTION)
+        if event.event_type not in _SKIP_TEXT_FILTERS:
             result = self._sanitizer.check(event)
             if not result.allowed:
                 return result
@@ -90,3 +100,8 @@ class InboundMiddlewareChain:
             return result
 
         return MiddlewareResult.allow()
+
+
+# Backwards-compatible alias — DEPRECATED. Only provides handler-side middleware.
+# For full inbound processing, compose HandlerMiddlewareChain + WorkerMiddlewareChain.
+InboundMiddlewareChain = HandlerMiddlewareChain

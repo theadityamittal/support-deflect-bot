@@ -91,7 +91,7 @@ class TestSlackOAuthCreatesSetupRecord:
             patch.dict(
                 "os.environ",
                 {
-                    "DYNAMODB_TABLE_NAME": "onboard-assist",
+                    "DYNAMODB_TABLE_NAME": "sherpa",
                     "KMS_KEY_ID": "arn:aws:kms:us-east-1:123:key/test",
                 },
             ),

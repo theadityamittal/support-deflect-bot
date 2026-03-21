@@ -66,9 +66,9 @@ class TestSlackHandlerE2E:
         print(f"  Correctly rejected: {data}")
 
     def test_slash_command_help(self, api_base_url, signing_secret):
-        """Slash command /onboard-help returns command list."""
+        """Slash command /sherpa-help returns command list."""
         body = {
-            "command": "/onboard-help",
+            "command": "/sherpa-help",
             "user_id": "U_E2E_TEST",
             "team_id": E2E_WORKSPACE_ID,
             "channel_id": "C_E2E_TEST",
@@ -89,17 +89,17 @@ class TestSlackHandlerE2E:
 
         assert response.status_code == 200
         data = response.json()
-        assert "/onboard-status" in data["text"]
-        assert "/onboard-help" in data["text"]
-        assert "/onboard-restart" in data["text"]
+        assert "/sherpa-status" in data["text"]
+        assert "/sherpa-help" in data["text"]
+        assert "/sherpa-restart" in data["text"]
         print(f"  Help response: {data['text'][:100]}...")
 
     def test_slash_command_status_no_plan(
         self, api_base_url, signing_secret, dynamodb_table
     ):
-        """Slash command /onboard-status with no plan returns appropriate message."""
+        """Slash command /sherpa-status with no plan returns appropriate message."""
         body = {
-            "command": "/onboard-status",
+            "command": "/sherpa-status",
             "user_id": "U_E2E_NO_PLAN",
             "team_id": E2E_WORKSPACE_ID,
             "channel_id": "C_E2E_TEST",
@@ -263,7 +263,7 @@ class TestSetupGatingE2E:
 
 @pytest.mark.e2e
 class TestNewSlashCommandsE2E:
-    """Tests for /onboard-setup and /onboard-calendar commands."""
+    """Tests for /sherpa-setup and /sherpa-calendar commands."""
 
     @pytest.fixture(autouse=True)
     def _seed_and_cleanup(self, dynamodb_table):
@@ -285,10 +285,10 @@ class TestNewSlashCommandsE2E:
         yield
         cleanup_dynamodb_test_records(dynamodb_table)
 
-    def test_slash_command_onboard_setup(self, api_base_url, signing_secret):
-        """/onboard-setup should return setup instructions."""
+    def test_slash_command_sherpa_setup(self, api_base_url, signing_secret):
+        """/sherpa-setup should return setup instructions."""
         body = {
-            "command": "/onboard-setup",
+            "command": "/sherpa-setup",
             "user_id": "U_E2E_ADMIN",
             "team_id": E2E_WORKSPACE_ID,
             "channel_id": "C_E2E_TEST",
@@ -313,12 +313,12 @@ class TestNewSlashCommandsE2E:
         assert (
             "configuration" in data["text"].lower() or "setup" in data["text"].lower()
         )
-        print(f"  /onboard-setup response: {data['text'][:100]}...")
+        print(f"  /sherpa-setup response: {data['text'][:100]}...")
 
-    def test_slash_command_onboard_calendar(self, api_base_url, signing_secret):
-        """/onboard-calendar should return calendar info."""
+    def test_slash_command_sherpa_calendar(self, api_base_url, signing_secret):
+        """/sherpa-calendar should return calendar info."""
         body = {
-            "command": "/onboard-calendar",
+            "command": "/sherpa-calendar",
             "user_id": "U_E2E_ADMIN",
             "team_id": E2E_WORKSPACE_ID,
             "channel_id": "C_E2E_TEST",
@@ -344,8 +344,8 @@ class TestNewSlashCommandsE2E:
             blocks_str = json.dumps(data["blocks"]).lower()
             assert "calendar" in blocks_str
             print(
-                f"  /onboard-calendar response: blocks with {len(data['blocks'])} sections"
+                f"  /sherpa-calendar response: blocks with {len(data['blocks'])} sections"
             )
         else:
             assert "calendar" in data["text"].lower()
-            print(f"  /onboard-calendar response: {data['text'][:100]}...")
+            print(f"  /sherpa-calendar response: {data['text'][:100]}...")

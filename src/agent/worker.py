@@ -17,6 +17,15 @@ logger.setLevel(logging.DEBUG)
 _cached_secrets: dict[str, str] | None = None
 
 
+def _get_state_store() -> Any:
+    """Get DynamoStateStore for the configured table."""
+    from state.dynamo import DynamoStateStore
+
+    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "sherpa")
+    table = boto3.resource("dynamodb").Table(table_name)
+    return DynamoStateStore(table=table)
+
+
 def _get_app_secrets() -> dict[str, str]:
     """Read consolidated secrets from Secrets Manager. Cached per cold start."""
     global _cached_secrets  # noqa: PLW0603
@@ -56,6 +65,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             event_type = message.get("event_type", "message")
             metadata = message.get("metadata") or {}
             action_id = metadata.get("action_id")
+            thread_ts = metadata.get("thread_ts") or message.get("thread_ts")
 
             logger.info(
                 "Processing message workspace=%s user=%s channel=%s event_type=%s text=%s",
@@ -66,12 +76,54 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 text[:80],
             )
 
+            # Kill switch check
+            from admin.kill_switch_check import is_kill_switch_active
+
+            state_store = _get_state_store()
+
+            if is_kill_switch_active(state_store):
+                logger.info("Kill switch active, skipping message processing")
+                _release_user_lock(workspace_id=workspace_id, user_id=user_id)
+                continue
+
             logger.debug("Fetching bot token for workspace=%s", workspace_id)
             bot_token = _get_bot_token(workspace_id)
             logger.debug("Bot token retrieved (length=%d)", len(bot_token))
 
             slack_client = SlackClient(web_client=WebClient(token=bot_token))
             logger.debug("SlackClient created")
+
+            # Run worker middleware (InputSanitizer + TokenBudgetGuard)
+            from middleware.inbound.chain import WorkerMiddlewareChain
+            from slack.models import EventType, SlackEvent
+
+            slack_event = SlackEvent(
+                event_id=message.get("event_id", ""),
+                workspace_id=workspace_id,
+                user_id=user_id,
+                channel_id=channel_id,
+                text=text,
+                event_type=EventType(event_type),
+                timestamp=message.get("timestamp", ""),
+                is_bot=False,
+                thread_ts=thread_ts,
+            )
+
+            worker_chain = WorkerMiddlewareChain(state_store=state_store)
+            mw_result = worker_chain.run(slack_event)
+
+            if not mw_result.allowed:
+                logger.info("Worker middleware rejected: %s", mw_result.reason)
+                try:
+                    if mw_result.should_respond and mw_result.reason and channel_id:
+                        slack_client.send_ephemeral(
+                            channel=channel_id, user=user_id, text=mw_result.reason
+                        )
+                except Exception:
+                    logger.exception("Failed to send ephemeral rejection")
+                finally:
+                    _release_user_lock(workspace_id=workspace_id, user_id=user_id)
+                continue
 
             # Check for active SETUP record — route to setup state machine if present
             setup_state = _get_setup_state(workspace_id=workspace_id)
@@ -141,11 +193,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 def _release_user_lock(*, workspace_id: str, user_id: str) -> None:
     """Release the per-user processing lock in DynamoDB."""
     try:
-        from state.dynamo import DynamoStateStore
-
-        table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
-        table = boto3.resource("dynamodb").Table(table_name)
-        store = DynamoStateStore(table=table)
+        store = _get_state_store()
         store.release_lock(workspace_id=workspace_id, user_id=user_id)
         logger.debug("Released lock for workspace=%s user=%s", workspace_id, user_id)
     except Exception:
@@ -155,36 +203,23 @@ def _release_user_lock(*, workspace_id: str, user_id: str) -> None:
 
 
 def _get_bot_token(workspace_id: str) -> str:
-    """Get bot token: consolidated secret → DynamoDB SECRETS → WorkspaceConfig (with migration)."""
-    # 1. Try consolidated Secrets Manager secret (deployment-time secret)
-    try:
-        secrets = _get_app_secrets()
-        token = secrets.get("bot_token", "")
-        if token and token != "placeholder":
-            logger.debug("_get_bot_token: found in consolidated secret")
-            return str(token)
-    except ValueError:
-        logger.debug("_get_bot_token: APP_SECRETS_ARN not set, trying DynamoDB")
-
-    # 2. Try DynamoDB SECRETS record (per-workspace, post-OAuth) with lazy migration fallback
+    """Get bot token: DynamoDB SECRETS (KMS) → plaintext WorkspaceConfig fallback."""
     from security.crypto import FieldEncryptor
-    from state.dynamo import DynamoStateStore
 
     kms_key_id = os.environ.get("KMS_KEY_ID", "")
-    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
-    table = boto3.resource("dynamodb").Table(table_name)
-    store = DynamoStateStore(table=table)
+    store = _get_state_store()
 
+    # Tier 1: DynamoDB SECRETS record (KMS-encrypted, per-workspace)
     if kms_key_id:
         try:
             encryptor = FieldEncryptor(kms_key_id=kms_key_id)
             token = store.get_bot_token(workspace_id=workspace_id, encryptor=encryptor)
-            logger.debug("_get_bot_token: found via DynamoDB SECRETS/CONFIG")
-            return token
+            logger.debug("_get_bot_token: found via DynamoDB SECRETS")
+            return str(token)
         except ValueError:
             pass
 
-    # 3. Fallback: plaintext WorkspaceConfig (no KMS available)
+    # Tier 2: plaintext WorkspaceConfig (legacy, triggers lazy migration)
     config = store.get_workspace_config(workspace_id=workspace_id)
     if config and config.bot_token:
         logger.debug("_get_bot_token: found in plaintext workspace config")
@@ -196,11 +231,7 @@ def _get_bot_token(workspace_id: str) -> str:
 
 def _get_setup_state(*, workspace_id: str) -> Any:
     """Return the active SETUP record for the workspace, or None if absent."""
-    from state.dynamo import DynamoStateStore
-
-    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
-    table = boto3.resource("dynamodb").Table(table_name)
-    store = DynamoStateStore(table=table)
+    store = _get_state_store()
     result = store.get_setup_state(workspace_id=workspace_id)
     logger.debug(
         "_get_setup_state: workspace=%s found=%s", workspace_id, result is not None
@@ -218,11 +249,8 @@ def _call_process_setup_message(
 ) -> None:
     """Build minimal SetupDependencies and delegate to process_setup_message."""
     from admin.setup import SetupDependencies, process_setup_message
-    from state.dynamo import DynamoStateStore
 
-    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
-    table = boto3.resource("dynamodb").Table(table_name)
-    state_store = DynamoStateStore(table=table)
+    state_store = _get_state_store()
 
     sqs_queue_url = os.environ.get("SQS_QUEUE_URL", "")
     google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -264,7 +292,6 @@ def _create_orchestrator(
     logger.debug("_create_orchestrator: importing dependencies")
     from agent.orchestrator import Orchestrator
     from agent.tools.assign_channel import AssignChannelTool
-    from agent.tools.calendar_event import CalendarEventTool
     from agent.tools.manage_progress import ManageProgressTool
     from agent.tools.search_kb import SearchKBTool
     from agent.tools.send_message import SendMessageTool
@@ -273,7 +300,6 @@ def _create_orchestrator(
     from llm.router import LLMRouter
     from middleware.agent.turn_budget import TurnBudgetEnforcer
     from rag.vectorstore import PineconeVectorStore
-    from state.dynamo import DynamoStateStore
 
     logger.debug("_create_orchestrator: imports complete, loading settings")
     settings = get_settings()
@@ -284,8 +310,7 @@ def _create_orchestrator(
         settings.aws_region,
     )
 
-    table = boto3.resource("dynamodb").Table(settings.dynamodb_table_name)
-    state_store = DynamoStateStore(table=table)
+    state_store = _get_state_store()
     logger.debug("_create_orchestrator: DynamoDB state store ready")
 
     secrets = _get_app_secrets()
@@ -319,7 +344,6 @@ def _create_orchestrator(
             slack_client=slack_client, channel_id=channel_id
         ),
         "assign_channel": AssignChannelTool(slack_client=slack_client, user_id=user_id),
-        "calendar_event": CalendarEventTool(),
         "manage_progress": ManageProgressTool(
             state_store=state_store,
             workspace_id=workspace_id,
@@ -327,6 +351,32 @@ def _create_orchestrator(
             router=router,
         ),
     }
+
+    # Conditionally register calendar tool based on workspace config
+    workspace_config = state_store.get_workspace_config(workspace_id=workspace_id)
+    if workspace_config and workspace_config.calendar_enabled:
+        from agent.tools.calendar_event import CalendarEventTool
+        from gcal.client import GoogleCalendarClient
+        from security.crypto import FieldEncryptor
+
+        google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+        google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+        kms_key_id = os.environ.get("KMS_KEY_ID", "")
+
+        gcal_client = GoogleCalendarClient(
+            client_id=google_client_id, client_secret=google_client_secret
+        )
+        encryptor = FieldEncryptor(kms_key_id=kms_key_id)
+        tools["calendar_event"] = CalendarEventTool(
+            gcal_client=gcal_client,
+            encryptor=encryptor,
+            state_store=state_store,
+            workspace_id=workspace_id,
+        )
+        logger.debug("CalendarEventTool registered (calendar_enabled=True)")
+    else:
+        logger.debug("CalendarEventTool skipped (calendar_enabled=False)")
+
     logger.debug(
         "_create_orchestrator: %d tools registered: %s", len(tools), list(tools.keys())
     )

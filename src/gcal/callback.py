@@ -183,7 +183,7 @@ def _get_app_secrets() -> dict[str, Any]:
 
 def _get_store() -> Any:
     """Create a DynamoStateStore backed by the configured table."""
-    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "onboard-assist")
+    table_name = os.environ.get("DYNAMODB_TABLE_NAME", "sherpa")
     table = boto3.resource("dynamodb").Table(table_name)
     return DynamoStateStore(table=table)
 

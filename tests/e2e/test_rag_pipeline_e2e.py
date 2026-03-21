@@ -15,7 +15,7 @@ from rag.pipeline import RAGPipeline
 
 # Sample content for ingestion (avoids depending on external HTTP for scraping)
 SAMPLE_TEXT = (
-    "Onboard Assist is a serverless Slack onboarding bot for nonprofits. "
+    "Sherpa is a serverless Slack onboarding bot for nonprofits. "
     "It uses AWS Lambda, DynamoDB, and Pinecone for vector search. "
     "The bot generates personalized onboarding plans using Google Gemini. "
     "New volunteers answer intake questions via Block Kit forms. "
@@ -28,7 +28,7 @@ SAMPLE_TEXT = (
 )
 
 SAMPLE_HTML = f"<html><body><p>{SAMPLE_TEXT}</p></body></html>"
-SAMPLE_URL = "https://example.com/onboard-assist/docs"
+SAMPLE_URL = "https://example.com/sherpa/docs"
 
 
 def _query_with_retry(pipeline, *, query, workspace_id, retries=3, delay=5):

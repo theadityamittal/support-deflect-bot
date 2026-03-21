@@ -209,9 +209,9 @@ class TestSlashCommandEdgeCasesE2E:
     """Additional slash command scenarios."""
 
     def test_slash_command_restart(self, api_base_url, signing_secret):
-        """/onboard-restart should prompt for confirmation."""
+        """/sherpa-restart should prompt for confirmation."""
         body = {
-            "command": "/onboard-restart",
+            "command": "/sherpa-restart",
             "user_id": "U_E2E_RESTART",
             "team_id": E2E_WORKSPACE_ID,
             "channel_id": "C_E2E_TEST",
@@ -236,9 +236,9 @@ class TestSlashCommandEdgeCasesE2E:
         print(f"  Restart prompt: {data['text'][:100]}...")
 
     def test_unknown_command(self, api_base_url, signing_secret):
-        """Unknown slash command should suggest /onboard-help."""
+        """Unknown slash command should suggest /sherpa-help."""
         body = {
-            "command": "/onboard-foobar",
+            "command": "/sherpa-foobar",
             "user_id": "U_E2E_UNK",
             "team_id": E2E_WORKSPACE_ID,
             "channel_id": "C_E2E_TEST",
@@ -259,7 +259,7 @@ class TestSlashCommandEdgeCasesE2E:
 
         assert response.status_code == 200
         data = response.json()
-        assert "/onboard-help" in data["text"]
+        assert "/sherpa-help" in data["text"]
         print(f"  Unknown command response: {data['text']}")
 
     def test_interaction_endpoint_returns_ok(self, api_base_url, signing_secret):

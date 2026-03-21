@@ -1,7 +1,7 @@
 """E2E tests: DynamoDB state operations against deployed table.
 
 Tests lock lifecycle, workspace config, usage tracking, and kill switch
-against the real onboard-assist DynamoDB table.
+against the real sherpa DynamoDB table.
 
 Run: .venv/bin/pytest tests/e2e/test_dynamo_state_e2e.py -v -m e2e --no-cov -s
 """
